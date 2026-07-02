@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated corpus data — recreate by running the pipeline
+corpus/data/
+
+# Cloned SDK repo — not part of the project source
+braintree_python/
+
+# Local data and analysis files
+data/
+*.numbers
