@@ -4,7 +4,7 @@ agents/test_gen_agent.py — Playwright Test Generation Agent
 Responsible for:
   - Reading the TestGapReport from the analysis agent
   - For each test gap: retrieving relevant code from ChromaDB via RAG
-  - Calling Gemini to generate a valid Playwright .spec.ts or pytest file
+  - Calling OpenAI to generate a valid Playwright .spec.ts or pytest file
   - Saving generated tests to outputs/generated_tests/
 
 This is the FOURTH agent in the pipeline.
@@ -19,25 +19,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from google import genai
-from google.genai import types, errors as genai_errors
+import openai
+from openai import OpenAI
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 
-from config import GEMINI_MODEL, GEMINI_TEMPERATURE, GOOGLE_API_KEY, OUTPUT_DIR
+from config import OPENAI_MODEL, OPENAI_TEMPERATURE, OPENAI_API_KEY, OUTPUT_DIR
 from agents.embedding_agent import retrieve
 from models.report import TestGap, TestGapReport
 
 console = Console()
 
-_client: genai.Client | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> genai.Client:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = genai.Client(api_key=GOOGLE_API_KEY)
+        _client = OpenAI(api_key=OPENAI_API_KEY)
     return _client
 
 
@@ -93,29 +93,27 @@ def _build_context(chunks: list[dict], max_chars: int = 10_000) -> str:
     return "\n---\n".join(parts)
 
 
-def _call_gemini_code(prompt: str, max_retries: int = 4) -> str:
-    """Call Gemini and return raw code, with retry on transient errors."""
+def _call_openai_code(prompt: str, max_retries: int = 4) -> str:
+    """Call OpenAI and return raw code, with retry on transient errors."""
     for attempt in range(max_retries):
         try:
-            response = _get_client().models.generate_content(
-                model    = GEMINI_MODEL,
-                contents = prompt,
-                config   = types.GenerateContentConfig(
-                    temperature = GEMINI_TEMPERATURE,
-                ),
+            response = _get_client().chat.completions.create(
+                model       = OPENAI_MODEL,
+                temperature = OPENAI_TEMPERATURE,
+                messages    = [{"role": "user", "content": prompt}],
             )
-            text = response.text.strip()
+            text = response.choices[0].message.content.strip()
             # Strip markdown code fences if present
             if text.startswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
             return text
-        except (genai_errors.ServerError, genai_errors.ClientError, ConnectionError, OSError) as exc:
-            is_rate_limit = isinstance(exc, genai_errors.ClientError) and getattr(exc, "code", 0) == 429
+        except (openai.APIConnectionError, openai.APIStatusError, openai.RateLimitError) as exc:
+            is_rate_limit = isinstance(exc, openai.RateLimitError)
             wait = 30 if is_rate_limit else 15
             if attempt == max_retries - 1:
                 raise
-            console.print(f"\n     [yellow]⏳ Gemini error ({exc.__class__.__name__}). Retrying in {wait}s...[/yellow]")
+            console.print(f"\n     [yellow]⏳ OpenAI error ({exc.__class__.__name__}). Retrying in {wait}s...[/yellow]")
             time.sleep(wait)
     return ""
 
@@ -184,7 +182,7 @@ Rules:
 - Each test must be independent (no shared mutable state between tests)
 - Do not duplicate tests that already exist for sign-up, items, or user-settings pages"""
 
-    return _call_gemini_code(prompt)
+    return _call_openai_code(prompt)
 
 
 def _generate_api_test(gaps: list[TestGap], collection) -> str:
@@ -224,7 +222,7 @@ Rules:
 - Base URL is process.env.VITE_API_URL or "http://localhost:8000"
 - Follow the exact conventions listed above"""
 
-    return _call_gemini_code(prompt)
+    return _call_openai_code(prompt)
 
 
 def _generate_python_test(gap: TestGap, collection) -> str:
@@ -258,7 +256,7 @@ Rules:
 - Import the function under test with the correct module path
 - Each test function must have a clear docstring explaining what it verifies"""
 
-    return _call_gemini_code(prompt)
+    return _call_openai_code(prompt)
 
 
 # ─────────────────────────────────────────────────────────
@@ -271,7 +269,7 @@ def run(report: TestGapReport, collection) -> dict[str, str]:
 
     Pipeline:
         1. Group test gaps by output file
-        2. For each group, retrieve RAG context + call Gemini
+        2. For each group, retrieve RAG context + call OpenAI
         3. Save generated test files to outputs/generated_tests/
 
     Args:

@@ -1,5 +1,8 @@
-# Gemini API (new SDK)
-google-genai>=2.9.0
+# OpenAI API — generation + embeddings, used by every agent
+openai>=1.40.0
+
+# Recording pipeline orchestration (agents/recording_graph.py)
+langgraph>=0.2.0
 
 # Vector Store
 chromadb>=1.5.0

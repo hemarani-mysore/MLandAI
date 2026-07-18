@@ -1,0 +1,9 @@
+{
+  "name": "playwright-runner",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Node project used by the RAG Test Generator's `record` pipeline to run `npx playwright codegen` / `npx playwright test`.",
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}

@@ -3,7 +3,7 @@ agents/analysis_agent.py — RAG Analysis Agent
 ==============================================
 Responsible for:
   - Querying ChromaDB with targeted RAG queries
-  - Sending retrieved code to Gemini for structured analysis
+  - Sending retrieved code to OpenAI for structured analysis
   - Identifying API endpoints, UI pages, auth flows, and test gaps
   - Producing a TestGapReport saved as JSON + Markdown
 
@@ -19,15 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from rich.console import Console
 from rich.panel import Panel
 
 from config import (
-    GOOGLE_API_KEY,
-    GEMINI_MODEL,
-    GEMINI_TEMPERATURE,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    OPENAI_TEMPERATURE,
     OUTPUT_DIR,
     TOP_K_RESULTS,
 )
@@ -36,13 +35,13 @@ from models.report import APIEndpoint, UIPage, TestGap, TestGapReport
 
 console = Console()
 
-_client: genai.Client | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> genai.Client:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = genai.Client(api_key=GOOGLE_API_KEY)
+        _client = OpenAI(api_key=OPENAI_API_KEY)
     return _client
 
 
@@ -51,7 +50,7 @@ def _get_client() -> genai.Client:
 # ─────────────────────────────────────────────────────────
 
 def _build_context(chunks: list[dict], max_chars: int = 12_000) -> str:
-    """Concatenate retrieved chunks into a single context string for Gemini."""
+    """Concatenate retrieved chunks into a single context string for OpenAI."""
     parts = []
     total = 0
     for chunk in chunks:
@@ -63,26 +62,20 @@ def _build_context(chunks: list[dict], max_chars: int = 12_000) -> str:
     return "\n---\n".join(parts)
 
 
-def _call_gemini_json(prompt: str) -> list | dict:
+def _call_openai_json(prompt: str) -> dict:
     """
-    Call Gemini with JSON output mode and return the parsed result.
-    Strips markdown code fences if Gemini wraps the JSON anyway.
+    Call OpenAI with JSON output mode and return the parsed result.
+    Note: OpenAI's json_object mode requires the top-level response to be a
+    JSON object, not a bare array — every prompt below asks for a named
+    wrapper key (e.g. {"endpoints": [...]}) which callers then unwrap.
     """
-    response = _get_client().models.generate_content(
-        model   = GEMINI_MODEL,
-        contents = prompt,
-        config  = types.GenerateContentConfig(
-            temperature        = GEMINI_TEMPERATURE,
-            response_mime_type = "application/json",
-        ),
+    response = _get_client().chat.completions.create(
+        model           = OPENAI_MODEL,
+        temperature     = OPENAI_TEMPERATURE,
+        response_format = {"type": "json_object"},
+        messages        = [{"role": "user", "content": prompt}],
     )
-    text = response.text.strip()
-    # Safety: strip ```json ... ``` wrappers just in case
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text)
+    return json.loads(response.choices[0].message.content)
 
 
 # ─────────────────────────────────────────────────────────
@@ -104,22 +97,26 @@ CODEBASE CONTEXT (source + test files):
 Extract EVERY API endpoint defined with FastAPI decorators (@router.get, @router.post, etc.).
 For each endpoint also check whether a test function exists in the test files.
 
-Return a JSON array where each item has exactly these fields:
+Return a JSON object with exactly this shape:
 {{
-  "method": "GET",
-  "path": "/api/v1/users",
-  "description": "one sentence describing what this endpoint does",
-  "file_path": "backend/app/api/routes/users.py",
-  "has_test": true
+  "endpoints": [
+    {{
+      "method": "GET",
+      "path": "/api/v1/users",
+      "description": "one sentence describing what this endpoint does",
+      "file_path": "backend/app/api/routes/users.py",
+      "has_test": true
+    }}
+  ]
 }}
 
 Rules:
 - method must be uppercase: GET, POST, PUT, DELETE, PATCH
 - path must start with /
 - has_test is true only if you can see a corresponding test in the context
-- Return ONLY the JSON array, no explanation, no markdown"""
+- Return ONLY the JSON object, no explanation, no markdown"""
 
-    data = _call_gemini_json(prompt)
+    data = _call_openai_json(prompt)["endpoints"]
     endpoints = []
     for item in data:
         try:
@@ -157,21 +154,25 @@ CODEBASE CONTEXT (source + Playwright test files):
 Identify all distinct UI pages / routes in this application.
 For each page also check whether a Playwright test (.spec.ts) exists for it.
 
-Return a JSON array where each item has exactly these fields:
+Return a JSON object with exactly this shape:
 {{
-  "name": "Login",
-  "route": "/login",
-  "file_path": "frontend/src/routes/login.tsx",
-  "has_test": true
+  "pages": [
+    {{
+      "name": "Login",
+      "route": "/login",
+      "file_path": "frontend/src/routes/login.tsx",
+      "has_test": true
+    }}
+  ]
 }}
 
 Rules:
 - name should be a human-readable page name (e.g. Login, Dashboard, User Settings)
 - route must start with /
 - has_test is true only if a Playwright spec covers this page
-- Return ONLY the JSON array, no explanation, no markdown"""
+- Return ONLY the JSON object, no explanation, no markdown"""
 
-    data = _call_gemini_json(prompt)
+    data = _call_openai_json(prompt)["pages"]
     pages = []
     for item in data:
         try:
@@ -206,14 +207,18 @@ CODEBASE CONTEXT:
 
 Identify all distinct authentication and authorization flows in this codebase.
 
-Return a JSON array of strings, each describing one auth flow in one sentence.
-Examples:
-  "User logs in with email/password and receives a JWT access token"
-  "Superuser can reset any user's password via the admin endpoint"
+Return a JSON object with exactly this shape:
+{{
+  "flows": [
+    "User logs in with email/password and receives a JWT access token",
+    "Superuser can reset any user's password via the admin endpoint"
+  ]
+}}
+Each string describes one auth flow in one sentence.
 
-Return ONLY the JSON array of strings, no explanation, no markdown."""
+Return ONLY the JSON object, no explanation, no markdown."""
 
-    data = _call_gemini_json(prompt)
+    data = _call_openai_json(prompt)["flows"]
     flows = [str(f) for f in data if f]
 
     console.print(f"   [green]Found {len(flows)} auth flows[/green]")
@@ -255,13 +260,17 @@ Produce a prioritized list of test gaps. Include:
 2. All untested UI pages listed above
 3. Any critical utility functions in the context that lack tests
 
-Return a JSON array where each item has exactly these fields:
+Return a JSON object with exactly this shape:
 {{
-  "name": "POST /api/v1/users/signup",
-  "file_path": "backend/app/api/routes/users.py",
-  "gap_type": "api_endpoint",
-  "priority": "high",
-  "reason": "User registration endpoint has no automated test"
+  "gaps": [
+    {{
+      "name": "POST /api/v1/users/signup",
+      "file_path": "backend/app/api/routes/users.py",
+      "gap_type": "api_endpoint",
+      "priority": "high",
+      "reason": "User registration endpoint has no automated test"
+    }}
+  ]
 }}
 
 Rules:
@@ -270,9 +279,9 @@ Rules:
   - high   = auth, user data, money, security
   - medium = core CRUD, main user flows
   - low    = edge cases, admin-only, minor utilities
-- Return ONLY the JSON array, no explanation, no markdown"""
+- Return ONLY the JSON object, no explanation, no markdown"""
 
-    data = _call_gemini_json(prompt)
+    data = _call_openai_json(prompt)["gaps"]
     gaps = []
     valid_types     = {"api_endpoint", "ui_page", "function"}
     valid_priorities = {"high", "medium", "low"}
@@ -305,10 +314,10 @@ def run(collection, repo_url: str = "") -> TestGapReport:
     Main entry point for the analysis agent.
 
     Pipeline:
-        1. Find all API endpoints (RAG + Gemini)
-        2. Find all UI pages (RAG + Gemini)
-        3. Map authentication flows (RAG + Gemini)
-        4. Identify test gaps (RAG + Gemini)
+        1. Find all API endpoints (RAG + OpenAI)
+        2. Find all UI pages (RAG + OpenAI)
+        3. Map authentication flows (RAG + OpenAI)
+        4. Identify test gaps (RAG + OpenAI)
         5. Build TestGapReport and save to outputs/
 
     Args:

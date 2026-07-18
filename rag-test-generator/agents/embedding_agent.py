@@ -4,7 +4,7 @@ agents/embedding_agent.py — Code Chunking & Embedding Agent
 Responsible for:
   - Receiving a list of CodeFile objects from the ingestion agent
   - Chunking them into meaningful pieces (via code_chunker)
-  - Embedding each chunk using Google's text-embedding model
+  - Embedding each chunk using OpenAI's text-embedding model
   - Storing embeddings + metadata in ChromaDB
   - Providing a retrieval function: query → top-k relevant chunks
 
@@ -13,7 +13,6 @@ Input  : List[CodeFile]  (from ingestion_agent)
 Output : ChromaDB collection (persisted to disk) + retrieval function
 """
 
-import re
 import sys
 import time
 from pathlib import Path
@@ -21,16 +20,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import chromadb
-from google import genai
-from google.genai import types, errors as genai_errors
+import openai
+from openai import OpenAI
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn
 
 from config import (
-    GOOGLE_API_KEY,
+    OPENAI_API_KEY,
     CHROMA_DIR,
     CHROMA_COLLECTION_NAME,
-    GEMINI_EMBEDDING_MODEL,
+    OPENAI_EMBEDDING_MODEL,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     TOP_K_RESULTS,
@@ -40,12 +39,12 @@ from utils.code_chunker import chunk_all_files, CodeChunk
 
 console = Console()
 
-_client: genai.Client | None = None
+_client: OpenAI | None = None
 
-def _get_client() -> genai.Client:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = genai.Client(api_key=GOOGLE_API_KEY)
+        _client = OpenAI(api_key=OPENAI_API_KEY)
     return _client
 
 
@@ -53,32 +52,26 @@ def _get_client() -> genai.Client:
 # Embedding helper
 # ─────────────────────────────────────────────
 
-# Free tier: 100 requests/minute → pace at ~92/min to stay safely under the limit
-_INTER_REQUEST_DELAY = 0.65   # seconds between each embed call
-_MAX_RETRIES         = 6
+_MAX_RETRIES = 6
 
 
-def embed_text(text: str) -> list[float]:
+def embed_batch(texts: list[str]) -> list[list[float]]:
     """
-    Call Google's embedding API to convert text → vector, with retry-on-429.
-
-    We use task_type="retrieval_document" when embedding chunks for storage,
-    and "retrieval_query" when embedding a search query. This tells the model
-    to optimize the vector for that use case.
+    Call OpenAI's embedding API to convert a batch of texts → vectors in one
+    request, with retry-on-429. Order of the returned vectors matches `texts`.
     """
     for attempt in range(_MAX_RETRIES):
         try:
-            result = _get_client().models.embed_content(
-                model   = GEMINI_EMBEDDING_MODEL,
-                contents = text,
-                config  = types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+            response = _get_client().embeddings.create(
+                model = OPENAI_EMBEDDING_MODEL,
+                input = texts,
             )
-            return result.embeddings[0].values
-        except genai_errors.ClientError as exc:
-            if exc.code != 429 or attempt == _MAX_RETRIES - 1:
+            return [d.embedding for d in response.data]
+        except (openai.APIConnectionError, openai.APIStatusError, openai.RateLimitError) as exc:
+            is_rate_limit = isinstance(exc, openai.RateLimitError)
+            if not is_rate_limit or attempt == _MAX_RETRIES - 1:
                 raise
-            m = re.search(r"retry in (\d+)", str(exc), re.IGNORECASE)
-            wait = int(m.group(1)) + 5 if m else 60
+            wait = 30
             console.print(
                 f"\n[yellow]⏳ Rate-limit hit (attempt {attempt + 1}/{_MAX_RETRIES}). "
                 f"Waiting {wait}s...[/yellow]"
@@ -88,13 +81,8 @@ def embed_text(text: str) -> list[float]:
 
 
 def embed_query(query: str) -> list[float]:
-    """Embed a search query (different task_type than document embedding)."""
-    result = _get_client().models.embed_content(
-        model    = GEMINI_EMBEDDING_MODEL,
-        contents = query,
-        config   = types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
-    )
-    return result.embeddings[0].values
+    """Embed a single search query — thin wrapper around embed_batch()."""
+    return embed_batch([query])[0]
 
 
 # ─────────────────────────────────────────────
@@ -190,11 +178,8 @@ def store_chunks(
                 for c in batch
             ]
 
-            # Embed each text individually, pacing calls to stay under free-tier quota
-            embeddings = []
-            for doc in documents:
-                embeddings.append(embed_text(doc))
-                time.sleep(_INTER_REQUEST_DELAY)
+            # Embed the whole batch in a single OpenAI API call
+            embeddings = embed_batch(documents)
 
             collection.add(
                 ids        = ids,

@@ -2,7 +2,7 @@
 tests/test_gen.py — Unit tests for agents/test_gen_agent.py
 ============================================================
 Tests filename routing and context-building helpers.
-Gemini API calls are not tested here.
+OpenAI API calls are not tested here.
 
 Run with:
     pytest tests/test_gen.py -v

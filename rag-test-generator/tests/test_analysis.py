@@ -2,7 +2,7 @@
 tests/test_analysis.py — Unit tests for agents/analysis_agent.py
 =================================================================
 Tests the pure-Python helpers (context building, output parsing).
-Gemini API calls are not tested here — they are exercised manually
+OpenAI API calls are not tested here — they are exercised manually
 via `python agents/analysis_agent.py`.
 
 Run with:

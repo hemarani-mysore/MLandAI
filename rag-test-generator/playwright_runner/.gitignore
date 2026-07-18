@@ -1,0 +1,7 @@
+node_modules/
+test-results/
+playwright-report/
+
+# Working copies written per record-pipeline attempt — ephemeral, overwritten every run.
+# Final artifacts live in outputs/recorded_tests/ (also gitignored) instead.
+tests/*.spec.js

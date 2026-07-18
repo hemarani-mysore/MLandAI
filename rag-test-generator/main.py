@@ -6,10 +6,15 @@ Usage:
   python main.py verify-setup
   python main.py analyze --repo <github-url>
   python main.py generate --repo <github-url> [--push] [--dry-run] [--reset]
+  python main.py record --url <live-url> [--name <scenario-name>] [--max-attempts N]
 """
 
 import json
+import re
+import subprocess
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
@@ -25,12 +30,26 @@ def _print_banner():
     text = Text()
     text.append("RAG Test Generator\n", style="bold cyan")
     text.append("AI-powered Playwright test generation from any GitHub repo\n", style="dim")
-    text.append("Stack: Gemini API · ChromaDB · Playwright · GitHub API", style="dim")
+    text.append("Stack: OpenAI · ChromaDB · Playwright · GitHub API", style="dim")
     console.print(Panel(text, border_style="cyan"))
 
 
 def _step(n: int, label: str):
     console.print(Rule(f"[bold cyan]Step {n}: {label}[/bold cyan]", style="cyan"))
+
+
+def _slugify_scenario_name(url: str, name: str | None) -> str:
+    """Build a filesystem/URL-safe scenario name, auto-derived from the URL + timestamp if not given."""
+    if name:
+        base = name
+    else:
+        parsed = urlparse(url)
+        base = f"{parsed.netloc}{parsed.path}"
+
+    slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+    if not name:
+        slug = f"{slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return slug or "recording"
 
 
 def _load_report(report_path: Path):
@@ -61,25 +80,25 @@ def verify_setup():
 
     console.print("[cyan]1. Checking environment variables...[/cyan]")
     try:
-        from config import validate_config, GOOGLE_API_KEY, GITHUB_TOKEN, GEMINI_MODEL
+        from config import validate_config
         validate_config()
         console.print("   [green]✅ All environment variables set[/green]")
     except EnvironmentError as e:
         console.print(f"   [red]❌ {e}[/red]")
         checks_passed = False
 
-    console.print("[cyan]2. Testing Gemini API connection...[/cyan]")
+    console.print("[cyan]2. Testing OpenAI API connection...[/cyan]")
     try:
-        from google import genai
-        from config import GOOGLE_API_KEY, GEMINI_MODEL
-        client   = genai.Client(api_key=GOOGLE_API_KEY)
-        response = client.models.generate_content(
-            model    = GEMINI_MODEL,
-            contents = "Say 'API connection successful' in exactly those words.",
+        from openai import OpenAI
+        from config import OPENAI_API_KEY, OPENAI_MODEL
+        client   = OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model    = OPENAI_MODEL,
+            messages = [{"role": "user", "content": "Say 'API connection successful' in exactly those words."}],
         )
-        console.print(f"   [green]✅ Gemini API — {response.text.strip()}[/green]")
+        console.print(f"   [green]✅ OpenAI API — {response.choices[0].message.content.strip()}[/green]")
     except Exception as e:
-        console.print(f"   [red]❌ Gemini API error: {e}[/red]")
+        console.print(f"   [red]❌ OpenAI API error: {e}[/red]")
         checks_passed = False
 
     console.print("[cyan]3. Testing ChromaDB...[/cyan]")
@@ -87,9 +106,9 @@ def verify_setup():
         import chromadb
         from config import CHROMA_DIR
         client     = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        collection = client.get_or_create_collection("_setup_test")
+        collection = client.get_or_create_collection("setup-test-check")
         collection.add(documents=["ping"], ids=["ping"])
-        client.delete_collection("_setup_test")
+        client.delete_collection("setup-test-check")
         console.print("   [green]✅ ChromaDB working[/green]")
     except Exception as e:
         console.print(f"   [red]❌ ChromaDB error: {e}[/red]")
@@ -112,6 +131,23 @@ def verify_setup():
         console.print(f"   [green]✅ GitPython {git.__version__}[/green]")
     except Exception as e:
         console.print(f"   [red]❌ GitPython error: {e}[/red]")
+        checks_passed = False
+
+    console.print("[cyan]6. Testing Node.js / Playwright (recording pipeline)...[/cyan]")
+    try:
+        from config import PLAYWRIGHT_RUNNER_DIR
+        result = subprocess.run(
+            ["npx", "playwright", "--version"],
+            cwd=str(PLAYWRIGHT_RUNNER_DIR),
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            console.print(f"   [green]✅ {result.stdout.strip()}[/green]")
+        else:
+            raise RuntimeError(result.stderr.strip() or "npx playwright --version failed")
+    except Exception as e:
+        console.print(f"   [red]❌ Node/Playwright error: {e}[/red]")
+        console.print("   [dim]Run: cd playwright_runner && npm install && npx playwright install --with-deps chromium[/dim]")
         checks_passed = False
 
     if not checks_passed:
@@ -260,6 +296,69 @@ def generate(
             f"  To push: [cyan]python main.py generate --repo {repo} --push --reuse-report[/cyan]",
             border_style="green",
         ))
+
+
+# ─────────────────────────────────────────────────────────
+# record  (recording pipeline)
+# ─────────────────────────────────────────────────────────
+
+@app.command()
+def record(
+    url          : str = typer.Option(..., "--url", "-u", help="Live URL to record a scenario from"),
+    name         : str = typer.Option(None, "--name", "-n", help="Scenario name (default: auto-slug from URL + timestamp)"),
+    max_attempts : int = typer.Option(None, "--max-attempts", help="Override MAX_FIX_ATTEMPTS from config"),
+):
+    """
+    Record a live browser scenario, generate a Playwright test, self-heal it
+    until it passes (or the LLM gives up), and produce a run report.
+
+    Example:
+
+      python main.py record --url https://example.com --name checkout-flow
+    """
+    _print_banner()
+
+    from config import validate_recording_config, MAX_FIX_ATTEMPTS
+    try:
+        validate_recording_config()
+    except EnvironmentError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    scenario_name = _slugify_scenario_name(url, name)
+    attempts_cap  = max_attempts or MAX_FIX_ATTEMPTS
+
+    from agents.recording_graph import build_graph, RecordingState
+
+    initial_state: RecordingState = {
+        "url"              : url,
+        "scenario_name"    : scenario_name,
+        "raw_recording"    : "",
+        "spec_code"        : "",
+        "spec_path"        : "",
+        "attempt"          : 0,
+        "max_attempts"     : attempts_cap,
+        "execution_passed" : False,
+        "execution_output" : "",
+        "dom_snapshot"     : "",
+        "give_up"          : False,
+        "give_up_reason"   : "",
+        "attempts_history" : [],
+        "report_path"      : "",
+    }
+
+    graph = build_graph()
+    final_state = graph.invoke(initial_state)
+
+    style = "green" if final_state["execution_passed"] else "yellow"
+    console.print(Panel(
+        f"[bold]Recording pipeline complete![/bold]\n\n"
+        f"  Scenario : {scenario_name}\n"
+        f"  Passed   : {final_state['execution_passed']}\n"
+        f"  Attempts : {len(final_state['attempts_history'])}\n"
+        f"  Report   : {final_state['report_path']}",
+        border_style=style,
+    ))
 
 
 if __name__ == "__main__":
