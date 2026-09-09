@@ -1,0 +1,14 @@
+{"id": "q01", "question": "What was Acme Robotics' revenue in fiscal 2025?", "expected_doc": "acme_robotics_10k.md", "answer_contains": ["42"]}
+{"id": "q02", "question": "How fast did Acme Robotics revenue grow year over year?", "expected_doc": "acme_robotics_10k.md", "answer_contains": ["30"]}
+{"id": "q03", "question": "What is Acme Robotics' single biggest operational risk?", "expected_doc": "acme_robotics_10k.md", "answer_contains": ["supplier", "actuator"]}
+{"id": "q04", "question": "How much cash runway does Acme Robotics have?", "expected_doc": "acme_robotics_10k.md", "answer_contains": ["month"]}
+{"id": "q05", "question": "How many US patents does Acme Robotics hold?", "expected_doc": "acme_robotics_techblog.md", "answer_contains": ["14"]}
+{"id": "q06", "question": "Who founded Acme Robotics and what are their backgrounds?", "expected_doc": "acme_robotics_techblog.md", "answer_contains": ["Ortiz", "Patel"]}
+{"id": "q07", "question": "What programming language is Acme's control software written in?", "expected_doc": "acme_robotics_techblog.md", "answer_contains": ["Rust"]}
+{"id": "q08", "question": "What is the technical moat for Acme Robotics?", "expected_doc": "acme_robotics_techblog.md", "answer_contains": ["actuator"]}
+{"id": "q09", "question": "Who led Globex Corp's Series C round?", "expected_doc": "globex_drones_overview.md", "answer_contains": ["Sequoia"]}
+{"id": "q10", "question": "How much did Globex raise in its Series C and at what valuation?", "expected_doc": "globex_drones_overview.md", "answer_contains": ["120", "850"]}
+{"id": "q11", "question": "Does Globex Corp compete with Acme Robotics?", "expected_doc": "globex_drones_overview.md", "answer_contains": ["not", "none"]}
+{"id": "q12", "question": "Who founded Nimbus Systems?", "expected_doc": "nimbus_systems_press.md", "answer_contains": ["Cole", "Reyes"]}
+{"id": "q13", "question": "What is the status of the Nimbus patent lawsuit against Acme?", "expected_doc": "nimbus_systems_press.md", "answer_contains": ["early", "no trial"]}
+{"id": "q14", "question": "Who invested in Nimbus Systems' Series A?", "expected_doc": "nimbus_systems_press.md", "answer_contains": ["Lux"]}

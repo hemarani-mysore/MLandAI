@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from langgraph.graph import END, START, StateGraph
 
@@ -19,6 +20,9 @@ from praxis.graph.nodes import (
 from praxis.graph.state import DossierState, initial_state
 from praxis.llm import StructuredLLM, get_llm
 from praxis.schemas import DossierRequest, DossierResponse
+
+if TYPE_CHECKING:
+    from praxis.rag import Corpus
 
 
 @lru_cache
@@ -59,10 +63,13 @@ def run_dossier(
     request: DossierRequest,
     *,
     llm: StructuredLLM | None = None,
+    corpus: Corpus | None = None,
     max_gap_loops: int | None = None,
 ) -> DossierResponse:
     graph = build_graph()
     configurable: dict = {"llm": llm or get_llm()}
+    if corpus is not None:
+        configurable["corpus"] = corpus
     if max_gap_loops is not None:
         configurable["max_gap_loops"] = max_gap_loops
 
@@ -71,6 +78,13 @@ def run_dossier(
         config={"configurable": configurable},
     )
 
+    sources = sorted(
+        {
+            ev.citation.source_id
+            for ev in final["evidence"]
+            if ev.citation.source_id not in ("no-source", "stub-001")
+        }
+    )
     return DossierResponse(
         request=request,
         plan=final["plan"],
@@ -78,4 +92,5 @@ def run_dossier(
         verification=final["verification"],
         evidence_count=len(final["evidence"]),
         iterations=final["iteration"],
+        sources=sources,
     )

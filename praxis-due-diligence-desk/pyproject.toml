@@ -17,6 +17,9 @@ dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "tenacity>=9.0",
+    "qdrant-client>=1.12",
+    "pymupdf>=1.24",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +29,9 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13",
 ]
+# Optional heavier retrieval backends (not needed for the deterministic path / CI):
+rerank = ["sentence-transformers>=3.0"]
+ragas = ["ragas>=0.2", "datasets>=3.0"]
 
 [project.scripts]
 praxis = "praxis.cli:main"
@@ -44,7 +50,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]  # B008: Depends(...) in defaults is the FastAPI idiom
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
@@ -56,6 +62,12 @@ ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = false
 warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# numpy 2.2+ stubs use 3.12-only syntax; we only need it as an opaque dep.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 addopts = "-q"

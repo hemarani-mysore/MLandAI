@@ -1,4 +1,4 @@
-.PHONY: install fmt lint type test check run api demo clean
+.PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -17,12 +17,18 @@ type:  ## Type-check
 test:  ## Unit tests
 	uv run pytest
 
-check: lint type test  ## Everything CI runs
+eval-rag:  ## Deterministic retrieval eval (report)
+	uv run python evals/rag_eval.py
+
+eval-rag-gate:  ## Retrieval eval as a pass/fail gate (used in CI)
+	uv run python evals/rag_eval.py --gate
+
+check: lint type test eval-rag-gate  ## Everything CI runs
 
 run: demo  ## alias
 
-demo:  ## Run a dossier from the CLI (fake provider, no keys needed)
-	uv run praxis run "Acme Robotics" --depth standard
+demo:  ## Ingest the fixture corpus, then run a grounded dossier (no keys needed)
+	uv run praxis run "Acme Robotics" --ingest evals/datasets/corpus/*.md
 
 api:  ## Serve the API on :8000
 	uv run uvicorn praxis.api.main:app --reload --port 8000

@@ -46,5 +46,17 @@ jobs:
       - name: Pytest
         run: uv run pytest
 
-  # Phase 4 will add: eval-gate (LLM-as-judge F1 + RAGAS on a fixed slice).
+  eval-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: RAG retrieval eval (deterministic, gated)
+        run: uv run python evals/rag_eval.py --gate
+
+  # Phase 4 will add: LLM-as-judge F1 + RAGAS on a fixed slice to the eval gate.
   # Phase 5 will add: docker build -> GHCR, and `kind` smoke test of deploy/k8s.

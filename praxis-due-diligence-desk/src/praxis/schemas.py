@@ -124,3 +124,6 @@ class DossierResponse(BaseModel):
     verification: VerificationReport
     evidence_count: int
     iterations: int
+    sources: list[str] = Field(
+        default_factory=list, description="Distinct corpus source ids the evidence drew on"
+    )

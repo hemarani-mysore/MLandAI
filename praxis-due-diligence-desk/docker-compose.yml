@@ -1,7 +1,9 @@
-# Phase 0: just the API (runs with the `fake` LLM provider, no keys needed).
-#   docker compose up --build   ->   curl -XPOST localhost:8000/dossiers.md -d '{"subject":"Acme Robotics"}'
+# Phase 1: API + Qdrant. Runs with the `fake` LLM + hashing embedder (no keys).
+#   docker compose up --build
+#   curl -s localhost:8000/corpus/stats
+#   curl -s -XPOST localhost:8000/dossiers.md -d '{"subject":"Acme Robotics"}'
 #
-# Phase 1 adds: qdrant (vectors), postgres (dossier + run history), worker (ingestion).
+# Phase 2 adds: postgres (dossier + run history) and a worker for ingestion.
 services:
   api:
     build: .
@@ -9,10 +11,26 @@ services:
       - "8000:8000"
     environment:
       PRAXIS_LLM_PROVIDER: ${PRAXIS_LLM_PROVIDER:-fake}
+      PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
+      PRAXIS_QDRANT_URL: http://qdrant:6333
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 30s
       timeout: 3s
       retries: 3
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:

@@ -84,27 +84,39 @@ loop · deterministic `FakeStructuredLLM` (whole system runs with no keys) · Fa
 compose · ruff + mypy + pytest · GitHub Actions (lint + type + test, py3.11/3.12) ·
 tests cover the happy path, the gap-fill loop, and citation-integrity flagging.
 
-### Phase 1 — RAG (~1 week)
-- `praxis-worker`: ingestion queue (arq/RQ). Fetch → parse (`pymupdf` for text +
-  page coords; a VLM for tables/figures) → chunk with metadata → **contextual
-  augmentation** (1-sentence LLM context per chunk, cached by content hash).
-- Embed dense + sparse BM25 → one **Qdrant hybrid collection**.
-- Retrieval: hybrid → RRF → **cross-encoder rerank** (`bge-reranker-v2` / Cohere) →
-  top-k with `{source, page, span}` citations. Cache by `(query, corpus_version)`.
-- `search_corpus` tool; researcher node uses it instead of the stub.
-- `evals/golden_questions.jsonl` (~50) + `rag_eval.py` (RAGAS: faithfulness,
-  context precision, context recall). `make eval-rag`.
-- Nebius provider wired (`ChatOpenAI` base-url shim).
-- compose gains `qdrant` + `postgres`.
+### Phase 1 — RAG ✅ (done)
+- Ingestion (synchronous; a pure function over a `Corpus` so Phase 2 can wrap it
+  in a worker unchanged): `parse` (pdf via `pymupdf`, md/txt/html, page-aware) →
+  `chunk` (overlap + `{source, page, ordinal, locator}` metadata) → optional
+  **contextual prefix** per chunk (`PRAXIS_CONTEXTUAL_CHUNKS`) → embed + index.
+- Hybrid retrieval: dense (**Qdrant**, in-memory or server) + sparse
+  (pure-Python **BM25** index) → **RRF** fuse (client-side) → **rerank**
+  (`LexicalReranker` default; `CrossEncoderReranker` via `--extra rerank`) →
+  top-k with grounded citations. Retrieval cached by `(corpus, version, query, k)`.
+- `search_corpus()` used by the researcher node, which now **grounds** each
+  `Evidence` citation to a retrieved chunk (snaps if the model cites anything else).
+- Offline path is dependency-light and deterministic: `HashEmbedder`, pure BM25,
+  `QdrantClient(":memory:")`. Real models via `PRAXIS_EMBEDDING_PROVIDER`.
+- Nebius provider wired for both chat (`ChatOpenAI` base-url) and embeddings.
+- API: `POST /corpus/documents`, `GET /corpus/stats`, `POST /corpus/search`,
+  `/ready` reports corpus stats. CLI: `praxis ingest`, `praxis search`,
+  `praxis run --ingest`.
+- Eval: frozen 4-doc fixture corpus + `evals/datasets/golden_questions.jsonl` (14) +
+  `evals/rag_eval.py` (recall@k / hit@1 / MRR / answer_hit) — **gates CI**
+  (`eval-gate` job). `rag_eval_ragas.py` is the richer keyed version (not in CI).
+- compose gains a real `qdrant`.
+- Deferred to Phase 2: the ingestion **worker/queue**, VLM table extraction,
+  Postgres.
 
 ### Phase 2 — Multi-agent for real (~1 week)
-- Real, tightened prompts with eval-covered few-shots.
+- Real, tightened prompts with eval-covered few-shots; multi-section editor
+  (kills the current "low rubric coverage" flag on the stub memo).
 - Researcher fan-out via LangGraph `Send` — one branch per sub-question, concurrent.
 - `evidence_refs` populated so the memo and UI can trace each point.
-- `MemorySaver`/`PostgresSaver` checkpointer → resumable runs.
+- Ingestion **worker** (arq/RQ) + `POST /corpus/jobs`; `praxis-worker` service.
+- `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history in Postgres.
 - SSE endpoint streaming `graph.astream_events` → frontend shows each node glowing
   with its reasoning steps (Argus UX).
-- Dossier + run history persisted in Postgres.
 
 ### Phase 3 — MCP (~3 days)
 - `src/praxis/mcp/server.py` (FastMCP): tools `create_dossier`, `search_corpus`,
