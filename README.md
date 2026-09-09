@@ -1,24 +1,26 @@
-# MLandAI
+# MLandAI — branch: `praxis-due-diligence-desk`
 
-A collection of independent machine learning / AI projects. Each project lives on its **own branch**, not on `main` — check out the branch to see that project's code.
+> Part of [MLandAI](https://github.com/hemarani-mysore/MLandAI). Each project lives on
+> its own branch; `main` holds the index. This branch holds **Praxis**.
 
-## Branches
+## Praxis — a production due-diligence research desk
 
-| Branch | Project | What it does |
-|---|---|---|
-| [`IRISClassification`](https://github.com/hemarani-mysore/MLandAI/tree/IRISClassification) | Iris Flower Classification | Classic Iris dataset classification using an SVM model (scikit-learn), with the trained model and a walkthrough notebook. |
-| [`titanic-ml-project`](https://github.com/hemarani-mysore/MLandAI/tree/titanic-ml-project) | Titanic Survival Prediction | End-to-end Kaggle ML pipeline — EDA → feature engineering → ensemble modeling (Logistic Regression, Random Forest, XGBoost, Voting Ensemble) → submission. Best model: **84.17%** 5-fold CV accuracy. |
-| [`paypal-braintree-rag`](https://github.com/hemarani-mysore/MLandAI/tree/paypal-braintree-rag) | PayPal/Braintree RAG Pipeline | A RAG pipeline over scraped PayPal/Braintree developer docs, exploring multiple retrieval strategies: simple RAG, semantic chunking, hybrid (BM25 + embeddings) search, reranking, and reliability/evaluation techniques. |
-| [`rag-test-generator`](https://github.com/hemarani-mysore/MLandAI/tree/rag-test-generator) | Agentic RAG Test Generator | Two agentic pipelines built with OpenAI + LangGraph: (1) ingests any public GitHub repo, uses RAG to find untested code paths, and auto-generates + PRs Playwright/pytest tests; (2) records a live browser scenario, generates an executable Playwright test for it, and self-heals it in a loop until it passes. |
+A multi-agent (LangGraph) system that turns a subject — a company, a technology, a
+vendor, an acquisition target — into a **cited due-diligence memo**: summary →
+overview → bull case → bear case → risks → open questions → recommendation with a
+confidence score. Every claim links back to the evidence it came from.
 
-`main` just holds this index — there's no project code here.
+One project, exercising the full production stack:
 
-## Working on a project
+| Capability | In Praxis |
+|---|---|
+| LLM prompting · embeddings · RAG | Hybrid retrieval (dense + BM25) over an ingested corpus, cross-encoder reranking, page-level citations, structured LLM outputs everywhere |
+| MCP server with tools | `praxis-mcp` (FastMCP) exposes the desk as tools/resources/prompts; the research agents also *consume* external MCP tools |
+| Docker · Kubernetes · CI/CD | Per-service Dockerfiles, k8s manifests (HPA, NetworkPolicy, PDB) validated on `kind` in CI, GitHub Actions → GHCR → live URL |
+| Multi-agent | LangGraph graph: Planner → Researcher (fan-out) → {Bull ∥ Bear} → Red-team → Editor → Verifier, with an evaluator-optimizer gap-fill loop |
+| Eval framework | Golden dataset + LLM-as-judge (F1 vs expert labels), RAGAS retrieval metrics, deterministic citation-integrity + seeded-error checks — run as a CI regression gate |
+| Team of agents | Six role-specialized agents with their own prompts, tools, and model tiers |
 
-```bash
-git clone https://github.com/hemarani-mysore/MLandAI.git
-cd MLandAI
-git checkout <branch-name>   # e.g. git checkout rag-test-generator
-```
-
-Each project branch has its own setup instructions in that project's `README.md` (or `SETUP.md`).
+**The project is in [`praxis-due-diligence-desk/`](praxis-due-diligence-desk/).**
+See its [`README.md`](praxis-due-diligence-desk/README.md) for setup and
+[`PLAN.md`](praxis-due-diligence-desk/PLAN.md) for the full design and phase plan.
