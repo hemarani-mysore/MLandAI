@@ -117,20 +117,36 @@ RRF) · `test_rag_corpus.py` (4) · `test_rag_ingest.py` (3) · graph +
 
 ---
 
-## Phase 2 — Multi-agent for real  ·  ⬜ next  (~1 week)
+## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 1/5 done  (~1 week)
 
 **Goal:** real prompts + few-shots, parallel researcher fan-out, a multi-section
 editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 
+**Shipped as 5 slices, each its own commit + green CI:**
+1. ✅ **Real analytical memo** — prompts, `evidence_refs`, multi-section editor,
+   deterministic recommendation, memo-structure eval gate. (this commit)
+2. ⬜ Researcher fan-out via `Send` (steps 2).
+3. ⬜ Async graph (step 5).
+4. ⬜ Run persistence + checkpointing, SQLite (step 6, `GET /dossiers[/{id}]`).
+5. ⬜ SSE streaming + ingestion worker (steps 7–8).
+
 ### Steps
 
-1. **Prompts & few-shots** — `src/praxis/graph/prompts.py`
+1. **Prompts & few-shots** — `src/praxis/graph/prompts.py`  ✅ *(slice 1)*
    - Rewrite each role's system prompt: explicit output contract, the 6-section
      rubric, "every claim cites an evidence id", confidence-calibration guidance
-     (what 0.3 vs 0.8 means), "a weak case is a valid output".
+     (what 0.3 vs 0.8 means), "a weak case is a valid output".  ✅
    - `src/praxis/graph/fewshots/` — 1–2 worked examples per role (planner,
      analyst, red_team, editor) as `.md`/`.json`, injected into the prompt.
-   - Note each few-shot's subject so Phase 4 evals never reuse it.
+     **Deferred to Phase 4** — few-shots are only worth carrying once the eval
+     framework can measure whether they help and guard their subjects.
+   - **New in slice 1:** `graph/recommend.py` — the overall recommendation +
+     confidence are computed deterministically from the evidence balance and
+     red-team severity (the editor writes prose only), so the verdict is
+     calibrated identically for every provider and is unit-testable.
+   - **New in slice 1:** `PLACEHOLDER_SOURCE_IDS` in `schemas.py`; the verifier
+     now treats placeholder-only citations as *ungrounded* (not hallucinated)
+     and flags per-missing-section instead of one blanket low-coverage flag.
 
 2. **Researcher fan-out (`Send`)** — `src/praxis/graph/`
    - Split `researcher` into `dispatch_research` (returns
@@ -184,20 +200,23 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 
 ### Acceptance criteria
 
-- [ ] `praxis run` (fake provider, fixture corpus) yields a memo with **all 6**
-      rubric sections, each with ≥ 1 resolvable citation
-- [ ] `verifier` returns **no** `low rubric coverage` flag on `make demo`
+- [x] `praxis run` (fake provider, fixture corpus) yields a memo with **all 6**
+      rubric sections, each with ≥ 1 resolvable citation  *(slice 1)*
+- [x] `verifier` returns **no** `low rubric coverage` flag on `make demo`  *(slice 1)*
+- [x] a no-corpus run is honestly flagged: `insufficient_evidence` +
+      "no grounded sources", hallucination rate 0  *(slice 1)*
+- [x] `eval-gate` still green; new `evals/memo_structure_eval.py` added to the
+      gate (sections == rubric, every section cited, recommendation ∈ enum,
+      `--self-check` proves it catches a broken memo)  *(slice 1)*
 - [ ] Researcher branches run concurrently — a test asserts observed parallelism
-      ≤ `PRAXIS_RESEARCH_CONCURRENCY` and > 1
+      ≤ `PRAXIS_RESEARCH_CONCURRENCY` and > 1  *(slice 2)*
 - [ ] Gap-fill loop still bounded; `iterations` reported correctly
 - [ ] `POST /dossiers` → `GET /dossiers/{id}` returns the persisted run;
-      `GET /dossiers` lists it
-- [ ] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`
-- [ ] `POST /corpus/jobs` → poll → `succeeded`, `GET /corpus/stats` shows growth
+      `GET /dossiers` lists it  *(slice 4)*
+- [ ] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`  *(slice 5)*
+- [ ] `POST /corpus/jobs` → poll → `succeeded`, `GET /corpus/stats` shows growth  *(slice 5)*
 - [ ] CI green using SQLite + fakeredis; `docker compose up` brings up
-      api + worker + redis + qdrant, all healthy
-- [ ] `eval-gate` still green; new `evals/memo_structure_eval.py` added to the
-      gate (asserts: sections == rubric, every section cited, recommendation ∈ enum)
+      api + worker + redis + qdrant, all healthy  *(slices 4–5)*
 
 ### Tests to perform
 

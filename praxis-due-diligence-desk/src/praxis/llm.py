@@ -21,6 +21,7 @@ from pydantic import BaseModel, SecretStr
 
 from praxis.config import Settings, get_settings
 from praxis.schemas import (
+    RUBRIC_SECTIONS,
     Citation,
     DossierMemo,
     Evidence,
@@ -117,7 +118,7 @@ def _first_source_id(user: str) -> str | None:
     m = re.search(r"EVIDENCE SOURCES:\s*([^\n]+)", user)
     if m:
         first = m.group(1).split(",")[0].strip()
-        if first:
+        if first and first.lower() != "none":
             return first
     m = re.search(r"\[\d+\]\s*\(([A-Za-z0-9._:-]+);", user)  # "[0] (src-id; supports) ..."
     return m.group(1) if m else None
@@ -134,8 +135,6 @@ def _canned(schema: type[BaseModel], *, system: str, user: str) -> BaseModel:
     )
 
     if schema is ResearchPlan:
-        from praxis.schemas import RUBRIC_SECTIONS
-
         return ResearchPlan(
             subject=subject,
             thesis=f"Assess {subject} as a partner / investment / acquisition target.",
@@ -159,7 +158,12 @@ def _canned(schema: type[BaseModel], *, system: str, user: str) -> BaseModel:
             stance=stance,
             summary=f"{stance.title()} case for {subject} (stub synthesis).",
             points=[f"{stance.title()} consideration 1", f"{stance.title()} consideration 2"],
-            reasoning_steps=["Reviewed the shared evidence.", "Weighed it for this stance."],
+            reasoning_steps=[
+                "Reviewed the shared evidence.",
+                "Weighed it for this stance.",
+                "Noted which evidence items each point rests on.",
+            ],
+            evidence_refs=[0, 1],
         )
     if schema is RedTeamReport:
         return RedTeamReport()
@@ -171,10 +175,11 @@ def _canned(schema: type[BaseModel], *, system: str, user: str) -> BaseModel:
             confidence=0.4,
             sections=[
                 MemoSection(
-                    heading="Overview",
-                    body=f"{subject} — full multi-section synthesis lands in Phase 2.",
+                    heading=name,
+                    body=f"{subject} — {name.lower()}: deterministic stub synthesis.",
                     citations=[cite],
                 )
+                for name in RUBRIC_SECTIONS
             ],
             open_questions=["Everything: this is an early-phase skeleton."],
         )

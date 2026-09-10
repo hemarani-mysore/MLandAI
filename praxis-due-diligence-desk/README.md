@@ -19,7 +19,7 @@ CI, Docker/Kubernetes — in one coherent project.
 |---|---|---|
 | **0 — Scaffold** | repo layout, LangGraph skeleton (7 nodes, gap-fill loop), FastAPI + CLI, deterministic `fake` LLM, Docker, CI (lint + type + test) | ✅ **done** |
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
-| 2 — Multi-agent | real prompts, `Send` fan-out for researchers, multi-section editor, SSE streaming of node events, Postgres run history | ⬜ next |
+| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · `Send` fan-out, async graph, run persistence, SSE, ingestion worker *(slices 2–5 ⬜)* | 🟡 **in progress** |
 | 3 — MCP | `praxis-mcp` FastMCP server (tools/resources/prompts); agents consume external MCP tools | ⬜ |
 | 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
@@ -52,9 +52,10 @@ Real models: set `PRAXIS_LLM_PROVIDER=openai|anthropic|nebius` and
 API + a real Qdrant.
 
 ```bash
-make check      # lint + type + test + eval-gate (what CI runs)
-make demo       # ingest the fixture corpus, run a grounded dossier
-make eval-rag   # retrieval eval report
+make check           # lint + type + test + eval gates (what CI runs)
+make demo            # ingest the fixture corpus, run a grounded dossier
+make eval-rag        # retrieval eval report
+make eval-structure  # memo-structure eval report
 ```
 
 ## The graph
@@ -68,10 +69,10 @@ planner ─▶ researcher ─┬─▶ bull ──┐
 - **planner** — decomposes the request into a plan covering a fixed 6-section rubric
 - **researcher** — hybrid-retrieves the corpus per sub-question, emits one `Evidence`
   whose citation is *grounded* (snapped to a retrieved chunk); Phase 2 fans this out
-- **bull ∥ bear** — run concurrently; each builds one side of the case, only from evidence, with visible reasoning steps
+- **bull ∥ bear** — run concurrently; each builds one side of the case, only from evidence, with visible reasoning steps and `evidence_refs` back to the items each point rests on
 - **red_team** — audits both cases for unsupported claims / contradictions / coverage gaps; can loop back for gap-fill (bounded by `PRAXIS_MAX_GAP_LOOPS`)
-- **editor** — writes the memo on the cheap model tier; drops anything the red team flagged
-- **verifier** — deterministic: every citation must resolve to gathered evidence; scores rubric coverage; raises flags
+- **editor** — writes one section per rubric item on the cheap model tier, drops anything the red team flagged; the overall recommendation + confidence are then computed deterministically from the evidence balance (`graph/recommend.py`), not left to the model
+- **verifier** — deterministic: every citation must resolve to real gathered evidence (placeholders don't count); scores rubric coverage; flags missing / uncited sections and ungrounded memos
 
 ## Retrieval
 
@@ -92,12 +93,12 @@ paths don't change.
 ```
 src/praxis/
   config.py schemas.py llm.py render.py cli.py
-  graph/  state.py build.py prompts.py context.py  nodes/{planner,researcher,analysts,red_team,editor,verifier}.py
+  graph/  state.py build.py prompts.py context.py recommend.py  nodes/{planner,researcher,analysts,red_team,editor,verifier}.py
   rag/    parse.py chunk.py contextual.py embed.py bm25.py vector_store.py fuse.py rerank.py corpus.py retrieve.py ingest.py
   api/    main.py deps.py
   obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 41 tests: graph, retrieval, api, cli, schemas
-evals/  rag_eval.py + fixture corpus   # deterministic retrieval gate (CI)
+tests/                                 # 56 tests: graph, retrieval, api, cli, schemas, recommend, verifier
+evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
 ```

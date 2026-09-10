@@ -9,8 +9,20 @@ slice is live and gates CI today.
 datasets/
   corpus/*.md                  # 4 frozen fixture documents (Acme, Globex, Nimbus)
   golden_questions.jsonl       # 14 questions, each with an expected_doc + answer_contains
-rag_eval.py                    # deterministic retrieval eval  (no LLM, no network)
+rag_eval.py                    # deterministic retrieval eval  (no LLM, no network)  <-- CI gate
+memo_structure_eval.py         # deterministic memo-shape eval (no LLM, no network) <-- CI gate
 rag_eval_ragas.py              # RAGAS answer-quality eval     (needs keys; not in CI)
+```
+
+`memo_structure_eval.py` runs one dossier over the fixture corpus with the fake
+provider and asserts the memo has analyst-memo shape: one section per rubric item
+in order, every section cited, 0 hallucinated citations, full coverage, a valid
+recommendation, no verifier flags. `--self-check` runs it against a deliberately
+broken memo to prove the gate bites.
+
+```bash
+make eval-structure          # report
+make eval-structure-gate     # exit 1 on any failed check  <-- runs in CI
 ```
 
 `rag_eval.py` ingests the fixture corpus, runs every golden question through

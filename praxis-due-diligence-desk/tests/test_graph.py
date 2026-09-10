@@ -15,11 +15,14 @@ def test_happy_path_produces_a_memo():
     assert resp.plan.subject == "Acme Robotics"
     assert len(resp.plan.sub_questions) == len(RUBRIC_SECTIONS)
     assert isinstance(resp.memo, DossierMemo)
-    assert resp.memo.sections
+    # one section per rubric item, in rubric order
+    assert [s.heading for s in resp.memo.sections] == list(RUBRIC_SECTIONS)
     assert resp.evidence_count == len(RUBRIC_SECTIONS)
     assert resp.iterations == 1  # one red-team pass, no gap-fill
-    # Stub memo cites the stub source, which the researcher also used.
+    # No corpus -> nothing is grounded -> honest verdict + flag, but no hallucination.
+    assert resp.memo.recommendation == "insufficient_evidence"
     assert resp.verification.hallucinated_citation_rate == 0.0
+    assert any("no grounded sources" in f for f in resp.verification.flags)
 
 
 def test_gap_fill_loop_runs_then_terminates():
@@ -57,14 +60,20 @@ def test_researcher_grounds_evidence_in_the_corpus(corpus):
     assert len(resp.sources) == 1
     assert resp.sources[0].startswith("acme-10-k-")
     assert resp.evidence_count == len(RUBRIC_SECTIONS)
-    # every memo citation resolves to a real ingested source
+    # a fully grounded, rubric-complete memo -> verifier passes clean
+    assert [s.heading for s in resp.memo.sections] == list(RUBRIC_SECTIONS)
+    assert all(s.citations for s in resp.memo.sections)
     assert resp.verification.hallucinated_citation_rate == 0.0
+    assert resp.verification.coverage_score == 1.0
+    assert resp.verification.flags == []
+    assert resp.memo.recommendation != "insufficient_evidence"
 
 
 def test_no_corpus_yields_no_source_evidence():
     resp = run_dossier(DossierRequest(subject="Acme Robotics"), llm=FakeStructuredLLM())
     assert resp.sources == []
     assert resp.evidence_count == len(RUBRIC_SECTIONS)
+    assert resp.memo.confidence <= 0.35  # thin evidence -> low confidence
 
 
 def test_verifier_flags_unresolvable_citations():
@@ -86,5 +95,6 @@ def test_verifier_flags_unresolvable_citations():
     llm = FakeStructuredLLM(overrides={"editor": [bad_memo]})
     resp = run_dossier(DossierRequest(subject="Acme Robotics"), llm=llm)
 
-    assert resp.verification.hallucinated_citation_rate == 1.0
-    assert resp.verification.flags
+    # the fabricated "ghost" citation is caught (other sections get reconciled in)
+    assert resp.verification.hallucinated_citation_rate > 0
+    assert any("do not resolve" in f for f in resp.verification.flags)

@@ -111,13 +111,21 @@ tests cover the happy path, the gap-fill loop, and citation-integrity flagging.
 - Deferred to Phase 2: the ingestion **worker/queue**, VLM table extraction,
   Postgres.
 
-### Phase 2 — Multi-agent for real (~1 week)
-- Real, tightened prompts with eval-covered few-shots; multi-section editor
-  (kills the current "low rubric coverage" flag on the stub memo).
+### Phase 2 — Multi-agent for real (~1 week) — shipping in 5 slices
+
+**Slice 1 done:** real system prompts; multi-section editor (one section per
+rubric item, kills the "low rubric coverage" flag); `evidence_refs` populated +
+clipped; recommendation + confidence derived deterministically from the evidence
+balance and red-team severity (`graph/recommend.py`) rather than trusted from the
+model; verifier distinguishes ungrounded (placeholder) from hallucinated
+citations; new `memo_structure_eval.py` gate in CI. Few-shots deferred to Phase 4.
+
+Remaining slices:
 - Researcher fan-out via LangGraph `Send` — one branch per sub-question, concurrent.
-- `evidence_refs` populated so the memo and UI can trace each point.
-- Ingestion **worker** (arq/RQ) + `POST /corpus/jobs`; `praxis-worker` service.
-- `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history in Postgres.
+- Async graph (`agenerate`/`acomplete`, async nodes).
+- `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history
+  (SQLite dev / Postgres prod); `GET /dossiers[/{id}]`.
+- Ingestion **worker** (arq) + `POST /corpus/jobs`; `praxis-worker` service.
 - SSE endpoint streaming `graph.astream_events` → frontend shows each node glowing
   with its reasoning steps (Argus UX).
 

@@ -19,7 +19,7 @@ from praxis.graph.nodes import (
 )
 from praxis.graph.state import DossierState, initial_state
 from praxis.llm import StructuredLLM, get_llm
-from praxis.schemas import DossierRequest, DossierResponse
+from praxis.schemas import PLACEHOLDER_SOURCE_IDS, DossierRequest, DossierResponse
 
 if TYPE_CHECKING:
     from praxis.rag import Corpus
@@ -82,7 +82,7 @@ def run_dossier(
         {
             ev.citation.source_id
             for ev in final["evidence"]
-            if ev.citation.source_id not in ("no-source", "stub-001")
+            if ev.citation.source_id not in PLACEHOLDER_SOURCE_IDS
         }
     )
     return DossierResponse(

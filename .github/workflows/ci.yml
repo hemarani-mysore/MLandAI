@@ -58,5 +58,8 @@ jobs:
       - name: RAG retrieval eval (deterministic, gated)
         run: uv run python evals/rag_eval.py --gate
 
+      - name: Memo-structure eval (deterministic, gated)
+        run: uv run python evals/memo_structure_eval.py --gate
+
   # Phase 4 will add: LLM-as-judge F1 + RAGAS on a fixed slice to the eval gate.
   # Phase 5 will add: docker build -> GHCR, and `kind` smoke test of deploy/k8s.

@@ -1,4 +1,5 @@
-.PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate clean
+.PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate \
+        eval-structure eval-structure-gate clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -23,7 +24,13 @@ eval-rag:  ## Deterministic retrieval eval (report)
 eval-rag-gate:  ## Retrieval eval as a pass/fail gate (used in CI)
 	uv run python evals/rag_eval.py --gate
 
-check: lint type test eval-rag-gate  ## Everything CI runs
+eval-structure:  ## Deterministic memo-structure eval (report)
+	uv run python evals/memo_structure_eval.py
+
+eval-structure-gate:  ## Memo-structure eval as a pass/fail gate (used in CI)
+	uv run python evals/memo_structure_eval.py --gate
+
+check: lint type test eval-rag-gate eval-structure-gate  ## Everything CI runs
 
 run: demo  ## alias
 

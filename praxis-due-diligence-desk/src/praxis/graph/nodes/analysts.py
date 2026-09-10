@@ -14,6 +14,15 @@ from praxis.schemas import Finding
 _SYSTEM = {"bull": ANALYST_BULL, "bear": ANALYST_BEAR}
 
 
+def _clip_refs(refs: list[int], n: int) -> list[int]:
+    """Keep only in-range evidence indices, deduped, in first-seen order."""
+    seen: dict[int, None] = {}
+    for r in refs:
+        if 0 <= r < n:
+            seen.setdefault(r, None)
+    return list(seen)
+
+
 def _analyst(state: DossierState, config: RunnableConfig, stance: Literal["bull", "bear"]) -> dict:
     llm = llm_from(config)
     finding = llm.generate(
@@ -23,6 +32,7 @@ def _analyst(state: DossierState, config: RunnableConfig, stance: Literal["bull"
         role=f"{stance}_analyst",
     )
     finding.stance = stance
+    finding.evidence_refs = _clip_refs(finding.evidence_refs, len(state["evidence"]))
     return {stance: finding}
 
 

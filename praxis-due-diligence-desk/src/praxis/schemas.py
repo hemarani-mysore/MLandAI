@@ -28,6 +28,11 @@ RUBRIC_SECTIONS: tuple[str, ...] = (
     "Risks & Red Flags",
 )
 
+# Source ids that stand in for "nothing real was retrieved". A citation pointing
+# at one of these is not grounded — the verifier and the recommendation heuristic
+# both treat it as unresolved.
+PLACEHOLDER_SOURCE_IDS: frozenset[str] = frozenset({"no-source", "stub-001"})
+
 
 class Citation(BaseModel):
     """A pointer back to a specific piece of source material."""
