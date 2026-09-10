@@ -7,8 +7,11 @@ calibrated confidence. Every claim links back to the evidence it rests on.
 
 Built with **LangGraph** + **FastAPI**. Designed to exercise the full production
 stack — RAG, an MCP server, multi-agent orchestration, an eval framework wired into
-CI, Docker/Kubernetes — in one coherent project. Full design and phase plan in
-[`PLAN.md`](PLAN.md).
+CI, Docker/Kubernetes — in one coherent project.
+
+- [`PLAN.md`](PLAN.md) — design, requirement mapping, architecture, scope
+- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — per-phase steps,
+  acceptance criteria, and the test matrix (the doc to work from)
 
 ## Status
 
@@ -96,6 +99,7 @@ src/praxis/
 tests/                                 # 41 tests: graph, retrieval, api, cli, schemas
 evals/  rag_eval.py + fixture corpus   # deterministic retrieval gate (CI)
 deploy/ README.md                      # Phase 5
+docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
 ```
 
 ## Provenance

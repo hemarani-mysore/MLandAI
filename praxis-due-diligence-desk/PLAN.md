@@ -75,7 +75,10 @@ all six, so dossiers are comparable and coverage is measurable.
 
 ## 4. Phase plan
 
-Each phase ends with something runnable and a green CI.
+Each phase ends with something runnable and a green CI. This section is the
+summary; **[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) has the
+detailed per-phase steps, acceptance criteria, and test matrix** — that is the
+document to work from.
 
 ### Phase 0 — Scaffold ✅ (done)
 Repo layout · `DossierState` + 7 nodes wired in LangGraph with the bounded gap-fill
