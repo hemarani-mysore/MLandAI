@@ -5,7 +5,13 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Populate os.environ from .env so the provider SDKs' own key lookups
+# (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) work. Does not override anything
+# already exported — tests set PRAXIS_LLM_PROVIDER=fake before this runs.
+load_dotenv()
 
 Provider = Literal["fake", "openai", "anthropic", "nebius"]
 EmbeddingProvider = Literal["fake", "openai", "nebius"]
@@ -26,9 +32,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PRAXIS_", env_file=".env", extra="ignore")
 
     # --- LLM ---
+    # `fake` keeps a fresh checkout / CI fully offline. For real runs set
+    # PRAXIS_LLM_PROVIDER=openai (or anthropic / nebius) with the matching key.
     llm_provider: Provider = "fake"
-    strong_model: str = "openai:gpt-4o"
-    fast_model: str = "openai:gpt-4o-mini"
+    strong_model: str = "openai:gpt-4o"  # planner + bull/bear analysts
+    fast_model: str = "openai:gpt-4o-mini"  # editor + red_team
     # Roles that run on the cheaper/faster tier (calibration + synthesis work).
     fast_roles: tuple[str, ...] = ("editor", "red_team")
     nebius_base_url: str = NEBIUS_BASE_URL

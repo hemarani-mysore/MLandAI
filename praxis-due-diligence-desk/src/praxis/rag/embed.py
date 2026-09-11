@@ -48,6 +48,11 @@ class LangChainEmbedder:
             kwargs["base_url"] = base_url
         if api_key:
             kwargs["api_key"] = api_key
+        # OpenAI text-embedding-3-* support Matryoshka truncation to `dim`; ask
+        # for it so the vectors match the Qdrant collection size. Other backends
+        # (Nebius, ada-002) have a fixed width — don't send `dimensions` there.
+        if base_url is None and model.startswith("text-embedding-3"):
+            kwargs["dimensions"] = dim
         self._e = OpenAIEmbeddings(**kwargs)
         self.name = model
         self.dim = dim

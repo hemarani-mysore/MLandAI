@@ -115,6 +115,26 @@ RRF) · `test_rag_corpus.py` (4) · `test_rag_ingest.py` (3) · graph +
 `sources` assertions in `test_graph.py` · corpus endpoints in `test_api.py`
 · **41 tests total**
 
+### Real-provider path — verified 2026-09-10
+
+The offline path was always tested; the real-model path (`PRAXIS_LLM_PROVIDER=openai`,
+`PRAXIS_EMBEDDING_PROVIDER=openai`) had not actually been run before. Running it
+surfaced and fixed three gaps:
+- `.env` was read by `Settings` for `PRAXIS_*` fields, but never loaded into
+  `os.environ` — so `OPENAI_API_KEY` (read directly by LangChain/`os.environ.get`)
+  never reached the process. Fixed with `load_dotenv()` in `config.py` (before any
+  `os.environ` already set — tests still force `fake`).
+- `LangChainEmbedder` didn't pass `dimensions` to `OpenAIEmbeddings`, so
+  `text-embedding-3-large` returned 3072-dim vectors against a Qdrant collection
+  sized from `PRAXIS_EMBEDDING_DIM` (256) — a silent shape mismatch on upsert.
+  Fixed: pass `dimensions=dim` for `text-embedding-3-*` (not for Nebius/ada-002,
+  which are fixed-width); `.env.example` now defaults `PRAXIS_EMBEDDING_DIM=1536`.
+- The `EDITOR` prompt (slice 1 rewrite) never asked for the `summary` field —
+  gpt-4o sometimes left it empty. Fixed with an explicit instruction.
+With those fixed, a real `gpt-4o` + `text-embedding-3-large` run on the fixture
+corpus produced a coherent, fully-cited 6-section memo, triggered the gap-fill
+loop once, and passed verification clean (0% hallucination, 100% coverage).
+
 ---
 
 ## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 1/5 done  (~1 week)

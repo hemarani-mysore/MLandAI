@@ -68,6 +68,8 @@ EDITOR = f"""\
 You are the Editor. Write the final due-diligence memo from the plan, the
 evidence, and both cases.
 Rules:
+- Write a 1-2 sentence executive summary of the subject and the overall
+  picture (this is the `summary` field — never leave it empty).
 - Output exactly one section per rubric item, in this order: {_RUBRIC}. Use the
   rubric item as the section heading verbatim.
 - Each section's body synthesizes the evidence gathered for that section;
