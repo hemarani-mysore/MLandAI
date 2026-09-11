@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING
 
 from langgraph.graph import END, START, StateGraph
 
+from praxis.config import get_settings
 from praxis.graph.nodes import (
+    ResearchTask,
     bear,
     bull,
+    dispatch_research,
     editor,
     planner,
     red_team,
-    researcher,
+    research_one,
     route_after_red_team,
     verifier,
 )
@@ -29,13 +32,23 @@ if TYPE_CHECKING:
 def build_graph():
     """Compile the dossier graph.
 
-    planner -> researcher -> {bull, bear} -> red_team --(gaps?)--> researcher
-                                                      \\--(done)--> editor -> verifier -> END
+    planner --Send-->> research_one (fan-out, N in parallel) --(fan-in)--> {bull, bear}
+        --> red_team --(gaps? Send-->> research_one)--> ...
+                     \\--(clean / cap hit)--> editor -> verifier -> END
+
+    ``research_one`` runs once per sub-question, dispatched via ``Send`` from
+    ``dispatch_research`` (the initial plan) or ``dispatch_gap_fill`` (inside
+    ``route_after_red_team``, for the bounded gap-fill loop). Concurrency is
+    capped by ``max_concurrency`` on the run config (``PRAXIS_RESEARCH_CONCURRENCY``).
     """
     g: StateGraph = StateGraph(DossierState)
 
     g.add_node("planner", planner)
-    g.add_node("researcher", researcher)
+    # `research_one` is a Send fan-out target with its own input schema
+    # (ResearchTask), not the graph's DossierState — mypy's overload resolution
+    # for add_node doesn't cleanly cover that shape; verified correct at runtime
+    # (tests/test_graph_fanout.py) and against LangGraph's own documented pattern.
+    g.add_node("research_one", research_one, input_schema=ResearchTask)  # type: ignore[arg-type,call-overload]
     g.add_node("bull", bull)
     g.add_node("bear", bear)
     g.add_node("red_team", red_team)
@@ -43,16 +56,12 @@ def build_graph():
     g.add_node("verifier", verifier)
 
     g.add_edge(START, "planner")
-    g.add_edge("planner", "researcher")
-    g.add_edge("researcher", "bull")
-    g.add_edge("researcher", "bear")
+    g.add_conditional_edges("planner", dispatch_research, ["research_one"])
+    g.add_edge("research_one", "bull")
+    g.add_edge("research_one", "bear")
     g.add_edge("bull", "red_team")
     g.add_edge("bear", "red_team")
-    g.add_conditional_edges(
-        "red_team",
-        route_after_red_team,
-        {"researcher": "researcher", "editor": "editor"},
-    )
+    g.add_conditional_edges("red_team", route_after_red_team, ["research_one", "editor"])
     g.add_edge("editor", "verifier")
     g.add_edge("verifier", END)
 
@@ -65,6 +74,7 @@ def run_dossier(
     llm: StructuredLLM | None = None,
     corpus: Corpus | None = None,
     max_gap_loops: int | None = None,
+    research_concurrency: int | None = None,
 ) -> DossierResponse:
     graph = build_graph()
     configurable: dict = {"llm": llm or get_llm()}
@@ -72,10 +82,15 @@ def run_dossier(
         configurable["corpus"] = corpus
     if max_gap_loops is not None:
         configurable["max_gap_loops"] = max_gap_loops
+    concurrency = (
+        research_concurrency
+        if research_concurrency is not None
+        else get_settings().research_concurrency
+    )
 
     final = graph.invoke(
         initial_state(request.subject, request.depth),
-        config={"configurable": configurable},
+        config={"configurable": configurable, "max_concurrency": concurrency},
     )
 
     sources = sorted(

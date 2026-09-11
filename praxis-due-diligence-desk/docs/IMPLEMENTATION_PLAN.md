@@ -137,15 +137,16 @@ loop once, and passed verification clean (0% hallucination, 100% coverage).
 
 ---
 
-## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 1/5 done  (~1 week)
+## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 2/5 done  (~1 week)
 
 **Goal:** real prompts + few-shots, parallel researcher fan-out, a multi-section
 editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 
 **Shipped as 5 slices, each its own commit + green CI:**
 1. ✅ **Real analytical memo** — prompts, `evidence_refs`, multi-section editor,
-   deterministic recommendation, memo-structure eval gate. (this commit)
-2. ⬜ Researcher fan-out via `Send` (steps 2).
+   deterministic recommendation, memo-structure eval gate.
+2. ✅ **Researcher fan-out** — `research_one` dispatched via LangGraph `Send`,
+   one branch per sub-question, concurrent up to `PRAXIS_RESEARCH_CONCURRENCY`.
 3. ⬜ Async graph (step 5).
 4. ⬜ Run persistence + checkpointing, SQLite (step 6, `GET /dossiers[/{id}]`).
 5. ⬜ SSE streaming + ingestion worker (steps 7–8).
@@ -168,15 +169,26 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
      now treats placeholder-only citations as *ungrounded* (not hallucinated)
      and flags per-missing-section instead of one blanket low-coverage flag.
 
-2. **Researcher fan-out (`Send`)** — `src/praxis/graph/`
+2. **Researcher fan-out (`Send`)** — `src/praxis/graph/`  ✅ *(slice 2)*
    - Split `researcher` into `dispatch_research` (returns
-     `[Send("research_one", {"question": q, "section": s}) for ...]`) and
+     `[Send("research_one", {subject, section, question}) for ...]`) and
      `research_one` (one question → one `Evidence`, appended via the `evidence`
-     reducer).
-   - Rewire `build.py`: `planner → dispatch_research`; `research_one →` fan-in →
-     `bull` / `bear`. Gap-fill: `red_team →` (conditional) `dispatch_research`
-     with the gap questions only.
-   - `PRAXIS_RESEARCH_CONCURRENCY` (default 4) — cap parallel branches.
+     reducer). `research_one` is registered with its own `input_schema`
+     (`ResearchTask`) — its input is that small dict, not the full `DossierState`.
+   - Rewired `build.py`: `planner --Send-->> research_one` (via
+     `add_conditional_edges("planner", dispatch_research, ["research_one"])`);
+     `research_one →` fan-in → `bull` / `bear`. Gap-fill: `route_after_red_team`
+     now returns `dispatch_gap_fill(state)` (a `Send` list) instead of the
+     literal `"researcher"` when there are gaps, else `"editor"`.
+   - `PRAXIS_RESEARCH_CONCURRENCY` (default 4) — set as the run's top-level
+     `max_concurrency` (a native `RunnableConfig` key; LangGraph sizes the
+     `ThreadPoolExecutor` from it, capping *all* concurrent steps in the run,
+     not just this fan-out — acceptable since bull/bear is only ever 2 branches).
+   - mypy note: `add_node(..., input_schema=ResearchTask)` for a `Send`-fanned
+     node with a distinct per-branch schema hits a known overload-resolution gap
+     in the installed langgraph/mypy combo (verified correct at runtime via a
+     standalone probe against the official map-reduce pattern); silenced with a
+     scoped `# type: ignore[arg-type,call-overload]` + comment at the call site.
 
 3. **`evidence_refs`** — `src/praxis/graph/nodes/analysts.py`
    - Analysts return `Finding.evidence_refs` (indices into the evidence list);
@@ -228,9 +240,9 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 - [x] `eval-gate` still green; new `evals/memo_structure_eval.py` added to the
       gate (sections == rubric, every section cited, recommendation ∈ enum,
       `--self-check` proves it catches a broken memo)  *(slice 1)*
-- [ ] Researcher branches run concurrently — a test asserts observed parallelism
-      ≤ `PRAXIS_RESEARCH_CONCURRENCY` and > 1  *(slice 2)*
-- [ ] Gap-fill loop still bounded; `iterations` reported correctly
+- [x] Researcher branches run concurrently — a test asserts observed parallelism
+      ≤ `PRAXIS_RESEARCH_CONCURRENCY` and > 1  *(slice 2, `test_graph_fanout.py`)*
+- [x] Gap-fill loop still bounded; `iterations` reported correctly  *(slice 2)*
 - [ ] `POST /dossiers` → `GET /dossiers/{id}` returns the persisted run;
       `GET /dossiers` lists it  *(slice 4)*
 - [ ] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`  *(slice 5)*

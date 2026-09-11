@@ -120,8 +120,15 @@ balance and red-team severity (`graph/recommend.py`) rather than trusted from th
 model; verifier distinguishes ungrounded (placeholder) from hallucinated
 citations; new `memo_structure_eval.py` gate in CI. Few-shots deferred to Phase 4.
 
+**Slice 2 done:** researcher fan-out via LangGraph `Send` — `dispatch_research`
+emits one `Send("research_one", ...)` per sub-question (and `dispatch_gap_fill`
+does the same for the gap-fill loop), running concurrently up to
+`PRAXIS_RESEARCH_CONCURRENCY` (the run's `max_concurrency`); `research_one` is
+registered with its own input schema rather than the full graph state. Verified
+with a concurrency-tracking test (`test_graph_fanout.py`), not just a code
+review — observed parallelism sits strictly between 1 and the cap.
+
 Remaining slices:
-- Researcher fan-out via LangGraph `Send` — one branch per sub-question, concurrent.
 - Async graph (`agenerate`/`acomplete`, async nodes).
 - `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history
   (SQLite dev / Postgres prod); `GET /dossiers[/{id}]`.

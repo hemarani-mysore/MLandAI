@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.types import Send
 
 from praxis.graph.context import llm_from, max_gap_loops, render_case, render_evidence
+from praxis.graph.nodes.researcher import dispatch_gap_fill
 from praxis.graph.prompts import RED_TEAM
 from praxis.graph.state import DossierState
 from praxis.schemas import RedTeamReport
@@ -30,9 +32,9 @@ def red_team(state: DossierState, config: RunnableConfig) -> dict:
 
 def route_after_red_team(
     state: DossierState, config: RunnableConfig
-) -> Literal["researcher", "editor"]:
+) -> list[Send] | Literal["editor"]:
     report = state["redteam"]
     has_gaps = bool(report and report.gap_questions)
     if has_gaps and state["iteration"] <= max_gap_loops(config):
-        return "researcher"
+        return dispatch_gap_fill(state)
     return "editor"

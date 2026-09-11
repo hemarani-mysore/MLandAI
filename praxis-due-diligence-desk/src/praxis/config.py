@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     # --- Graph behaviour ---
     max_gap_loops: int = 1
+    research_concurrency: int = 4  # cap on parallel research_one branches (Send fan-out)
 
     # --- Observability ---
     otel_enabled: bool = False
