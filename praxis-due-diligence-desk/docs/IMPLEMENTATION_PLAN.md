@@ -137,7 +137,7 @@ loop once, and passed verification clean (0% hallucination, 100% coverage).
 
 ---
 
-## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 2/5 done  (~1 week)
+## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 3/5 done  (~1 week)
 
 **Goal:** real prompts + few-shots, parallel researcher fan-out, a multi-section
 editor, run persistence + checkpointing, SSE streaming, ingestion worker.
@@ -147,7 +147,9 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
    deterministic recommendation, memo-structure eval gate.
 2. ✅ **Researcher fan-out** — `research_one` dispatched via LangGraph `Send`,
    one branch per sub-question, concurrent up to `PRAXIS_RESEARCH_CONCURRENCY`.
-3. ⬜ Async graph (step 5).
+3. ✅ **Async graph** — every LLM-calling node is `async def`; `arun_dossier` is
+   the primary entry point, `run_dossier` a thin sync wrapper; the API calls
+   `arun_dossier` directly (async end to end, no worker-thread-per-request).
 4. ⬜ Run persistence + checkpointing, SQLite (step 6, `GET /dossiers[/{id}]`).
 5. ⬜ SSE streaming + ingestion worker (steps 7–8).
 
@@ -201,9 +203,24 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
    - Derive `recommendation` from the balance of bull/bear + red-team severity;
      `insufficient_evidence` when evidence is thin or all `no-source`.
 
-5. **Async graph** — `src/praxis/llm.py`, nodes, `build.py`
-   - Add `agenerate` / `acomplete`; make IO-bound nodes `async def`.
-   - `arun_dossier` + a sync `run_dossier` wrapper.
+5. **Async graph** — `src/praxis/llm.py`, nodes, `build.py`  ✅ *(slice 3)*
+   - `StructuredLLM` gained `agenerate`/`acomplete`; `LangChainStructuredLLM`
+     uses `.ainvoke()`; `FakeStructuredLLM`'s async methods delegate to the
+     sync ones (no real I/O to await).
+   - Every LLM-calling node is now `async def` (`planner`, `research_one`,
+     `bull`, `bear`, `red_team`, `editor`); `verifier` does no I/O and stays
+     sync — LangGraph runs sync nodes fine inside an async invocation.
+     `research_one`'s `search_corpus` call is sync (a real embedder makes a
+     blocking HTTP call inside it) — wrapped in `asyncio.to_thread` so it
+     doesn't stall the event loop for other concurrent branches.
+   - `arun_dossier` (async, the primary entry point, used by the API and by
+     `evals`/CLI internals that already run inside a loop) + `run_dossier`, a
+     thin sync wrapper (`asyncio.run(arun_dossier(...))`) for the CLI and other
+     non-async callers — **must not** be called from inside an already-running
+     event loop.
+   - `api/main.py`'s `POST /dossiers` and `/dossiers.md` are `async def` and
+     call `arun_dossier` directly (never the sync wrapper) — async end to end,
+     so a slow dossier run no longer ties up one of FastAPI's worker threads.
 
 6. **Run persistence + checkpointing** — `src/praxis/db/`
    - Deps: `sqlalchemy>=2`, `psycopg[binary]`, `alembic`, `langgraph-checkpoint-postgres`.

@@ -72,9 +72,9 @@ def _reconcile_sections(sections: list[MemoSection], state: DossierState) -> lis
     return out
 
 
-def editor(state: DossierState, config: RunnableConfig) -> dict:
+async def editor(state: DossierState, config: RunnableConfig) -> dict:
     llm = llm_from(config)
-    memo = llm.generate(
+    memo = await llm.agenerate(
         system=EDITOR,
         user=_context(state),
         schema=DossierMemo,

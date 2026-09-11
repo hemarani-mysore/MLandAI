@@ -1,7 +1,10 @@
 """FastAPI surface for the dossier desk.
 
 Phase 1: synchronous ``POST /dossiers`` + a corpus API (ingest / search / stats).
-Phase 2 adds SSE streaming of node events and moves ingestion to a worker.
+Phase 2: the dossier graph runs async end to end — these routes call
+``arun_dossier`` directly (never the sync ``run_dossier`` wrapper, which would
+deadlock inside a running event loop). SSE streaming and moving ingestion to a
+worker are still to come.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from pydantic import BaseModel, Field
 from praxis import __version__
 from praxis.api.deps import corpus_dep
 from praxis.config import get_settings
-from praxis.graph import run_dossier
+from praxis.graph import arun_dossier
 from praxis.rag import Corpus, RetrievedChunk, ingest_source
 from praxis.rag.models import CorpusStats, IngestResult
 from praxis.render import to_markdown
@@ -55,15 +58,17 @@ def ready(corpus: Corpus = Depends(corpus_dep)) -> dict:
 
 
 @app.post("/dossiers", response_model=DossierResponse)
-def create_dossier(
+async def create_dossier(
     request: DossierRequest, corpus: Corpus = Depends(corpus_dep)
 ) -> DossierResponse:
-    return run_dossier(request, corpus=corpus)
+    return await arun_dossier(request, corpus=corpus)
 
 
 @app.post("/dossiers.md", response_class=PlainTextResponse)
-def create_dossier_markdown(request: DossierRequest, corpus: Corpus = Depends(corpus_dep)) -> str:
-    return to_markdown(run_dossier(request, corpus=corpus))
+async def create_dossier_markdown(
+    request: DossierRequest, corpus: Corpus = Depends(corpus_dep)
+) -> str:
+    return to_markdown(await arun_dossier(request, corpus=corpus))
 
 
 @app.post("/corpus/documents", response_model=IngestResult)

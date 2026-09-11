@@ -11,6 +11,7 @@ retrieved chunk if the model cites anything else) — and appends it via the
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
@@ -77,7 +78,7 @@ def _ground(evidence: Evidence, hits: list[RetrievedChunk]) -> Evidence:
     return evidence
 
 
-def research_one(task: ResearchTask, config: RunnableConfig) -> dict[str, Any]:
+async def research_one(task: ResearchTask, config: RunnableConfig) -> dict[str, Any]:
     """Answer exactly one sub-question. Runs as a fanned-out ``Send`` branch, so
     its input is a single ``ResearchTask``, not the full ``DossierState``."""
     llm = llm_from(config)
@@ -85,9 +86,11 @@ def research_one(task: ResearchTask, config: RunnableConfig) -> dict[str, Any]:
     k = get_settings().retrieval_k
     subject, section, question = task["subject"], task["section"], task["question"]
 
-    hits = search_corpus(question, k=k, corpus=corpus)
+    # search_corpus is sync (a real embedder makes a blocking HTTP call inside
+    # it) — run it off the event loop so concurrent branches don't serialize.
+    hits = await asyncio.to_thread(search_corpus, question, k=k, corpus=corpus)
     if hits:
-        evidence = llm.generate(
+        evidence = await llm.agenerate(
             system=RESEARCHER,
             user=(
                 f"Subject: {subject}\n"

@@ -128,8 +128,17 @@ registered with its own input schema rather than the full graph state. Verified
 with a concurrency-tracking test (`test_graph_fanout.py`), not just a code
 review — observed parallelism sits strictly between 1 and the cap.
 
+**Slice 3 done:** the graph is async end to end. `StructuredLLM.agenerate`/
+`acomplete`; every LLM-calling node is `async def`; `arun_dossier` is the
+primary entry point, `run_dossier` a thin `asyncio.run` wrapper for the CLI;
+the API's dossier routes call `arun_dossier` directly, so a run no longer ties
+up a FastAPI worker thread. `research_one`'s retrieval call is sync (a real
+embedder does a blocking HTTP call) — wrapped in `asyncio.to_thread` so it
+doesn't stall other concurrent branches. Verified with an asyncio-native
+concurrency test (the slice-2 thread-based one no longer proved anything once
+branches moved off threads) and a real gpt-4o run through the live API route.
+
 Remaining slices:
-- Async graph (`agenerate`/`acomplete`, async nodes).
 - `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history
   (SQLite dev / Postgres prod); `GET /dossiers[/{id}]`.
 - Ingestion **worker** (arq) + `POST /corpus/jobs`; `praxis-worker` service.

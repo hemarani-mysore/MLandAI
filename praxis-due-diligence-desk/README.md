@@ -19,7 +19,7 @@ CI, Docker/Kubernetes — in one coherent project.
 |---|---|---|
 | **0 — Scaffold** | repo layout, LangGraph skeleton (7 nodes, gap-fill loop), FastAPI + CLI, deterministic `fake` LLM, Docker, CI (lint + type + test) | ✅ **done** |
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
-| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · researcher fan-out via `Send`, bounded concurrency *(slice 2 ✅)* · async graph, run persistence, SSE, ingestion worker *(slices 3–5 ⬜)* | 🟡 **in progress** |
+| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · researcher fan-out via `Send`, bounded concurrency *(slice 2 ✅)* · async graph end to end *(slice 3 ✅)* · run persistence, SSE, ingestion worker *(slices 4–5 ⬜)* | 🟡 **in progress** |
 | 3 — MCP | `praxis-mcp` FastMCP server (tools/resources/prompts); agents consume external MCP tools | ⬜ |
 | 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
@@ -66,6 +66,11 @@ planner ──Send──▶▶ research_one × N ──(fan-in)──┬─▶ b
                                                                         └──(clean / cap hit)──▶ editor ─▶ verifier ─▶ END
 ```
 
+Every LLM-calling node is `async def` (concurrent branches overlap on the event
+loop, not just a thread pool); `arun_dossier` is the entry point the API calls
+directly, `run_dossier` a sync wrapper for the CLI. `verifier` does no I/O and
+stays sync.
+
 - **planner** — decomposes the request into a plan covering a fixed 6-section rubric
 - **research_one** — hybrid-retrieves the corpus for one sub-question, emits one
   `Evidence` whose citation is *grounded* (snapped to a retrieved chunk);
@@ -100,7 +105,7 @@ src/praxis/
   rag/    parse.py chunk.py contextual.py embed.py bm25.py vector_store.py fuse.py rerank.py corpus.py retrieve.py ingest.py
   api/    main.py deps.py
   obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 60 tests: graph, fan-out, retrieval, api, cli, schemas, recommend, verifier
+tests/                                 # 62 tests: graph, fan-out, async, retrieval, api, cli, schemas, recommend, verifier
 evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests

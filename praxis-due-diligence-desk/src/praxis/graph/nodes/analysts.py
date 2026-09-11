@@ -23,9 +23,11 @@ def _clip_refs(refs: list[int], n: int) -> list[int]:
     return list(seen)
 
 
-def _analyst(state: DossierState, config: RunnableConfig, stance: Literal["bull", "bear"]) -> dict:
+async def _analyst(
+    state: DossierState, config: RunnableConfig, stance: Literal["bull", "bear"]
+) -> dict:
     llm = llm_from(config)
-    finding = llm.generate(
+    finding = await llm.agenerate(
         system=_SYSTEM[stance],
         user=f"Subject: {state['subject']}\n\nEvidence:\n{render_evidence(state)}",
         schema=Finding,
@@ -36,9 +38,9 @@ def _analyst(state: DossierState, config: RunnableConfig, stance: Literal["bull"
     return {stance: finding}
 
 
-def bull(state: DossierState, config: RunnableConfig) -> dict:
-    return _analyst(state, config, "bull")
+async def bull(state: DossierState, config: RunnableConfig) -> dict:
+    return await _analyst(state, config, "bull")
 
 
-def bear(state: DossierState, config: RunnableConfig) -> dict:
-    return _analyst(state, config, "bear")
+async def bear(state: DossierState, config: RunnableConfig) -> dict:
+    return await _analyst(state, config, "bear")

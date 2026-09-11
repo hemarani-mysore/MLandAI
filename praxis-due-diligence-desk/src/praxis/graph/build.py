@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,13 @@ def build_graph():
     ``dispatch_research`` (the initial plan) or ``dispatch_gap_fill`` (inside
     ``route_after_red_team``, for the bounded gap-fill loop). Concurrency is
     capped by ``max_concurrency`` on the run config (``PRAXIS_RESEARCH_CONCURRENCY``).
+
+    All the LLM-calling nodes (``planner``, ``research_one``, ``bull``, ``bear``,
+    ``red_team``, ``editor``) are ``async def`` — concurrent branches overlap on
+    the event loop, not just in a thread pool. ``verifier`` does no I/O and stays
+    sync; LangGraph runs sync nodes fine inside an async invocation. Invoke with
+    ``graph.ainvoke(...)`` (see ``arun_dossier`` below) — ``.invoke()`` would fail
+    on the async node functions.
     """
     g: StateGraph = StateGraph(DossierState)
 
@@ -68,7 +76,7 @@ def build_graph():
     return g.compile()
 
 
-def run_dossier(
+async def arun_dossier(
     request: DossierRequest,
     *,
     llm: StructuredLLM | None = None,
@@ -76,6 +84,9 @@ def run_dossier(
     max_gap_loops: int | None = None,
     research_concurrency: int | None = None,
 ) -> DossierResponse:
+    """Run a dossier end to end. The primary entry point — call this directly
+    from async code (e.g. a FastAPI ``async def`` handler); use ``run_dossier``
+    from sync code instead."""
     graph = build_graph()
     configurable: dict = {"llm": llm or get_llm()}
     if corpus is not None:
@@ -88,7 +99,7 @@ def run_dossier(
         else get_settings().research_concurrency
     )
 
-    final = graph.invoke(
+    final = await graph.ainvoke(
         initial_state(request.subject, request.depth),
         config={"configurable": configurable, "max_concurrency": concurrency},
     )
@@ -108,4 +119,29 @@ def run_dossier(
         evidence_count=len(final["evidence"]),
         iterations=final["iteration"],
         sources=sources,
+    )
+
+
+def run_dossier(
+    request: DossierRequest,
+    *,
+    llm: StructuredLLM | None = None,
+    corpus: Corpus | None = None,
+    max_gap_loops: int | None = None,
+    research_concurrency: int | None = None,
+) -> DossierResponse:
+    """Sync wrapper over ``arun_dossier``, for the CLI and other sync callers.
+
+    Do NOT call this from inside an already-running event loop (e.g. an async
+    FastAPI handler) — ``asyncio.run`` raises there. Call ``arun_dossier``
+    directly in async code instead.
+    """
+    return asyncio.run(
+        arun_dossier(
+            request,
+            llm=llm,
+            corpus=corpus,
+            max_gap_loops=max_gap_loops,
+            research_concurrency=research_concurrency,
+        )
     )

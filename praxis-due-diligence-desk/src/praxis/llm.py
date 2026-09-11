@@ -36,12 +36,24 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class StructuredLLM:
-    """Interface: given a prompt + schema + role, return a schema instance."""
+    """Interface: given a prompt + schema + role, return a schema instance.
+
+    Sync and async variants both exist: the graph nodes are ``async def`` and
+    call ``agenerate``/``acomplete`` (so concurrent branches genuinely overlap
+    on the event loop instead of only in a thread pool); ``generate``/``complete``
+    remain for direct/script use (e.g. ``evals/rag_eval_ragas.py``).
+    """
 
     def generate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
         raise NotImplementedError
 
     def complete(self, *, system: str, user: str, role: str = "util") -> str:
+        raise NotImplementedError
+
+    async def agenerate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
+        raise NotImplementedError
+
+    async def acomplete(self, *, system: str, user: str, role: str = "util") -> str:
         raise NotImplementedError
 
 
@@ -82,6 +94,16 @@ class LangChainStructuredLLM(StructuredLLM):
         result = self._models["fast"].invoke([("system", system), ("human", user)])
         return str(getattr(result, "content", result))
 
+    async def agenerate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
+        model = self._model(role).with_structured_output(schema)
+        result = await model.ainvoke([("system", system), ("human", user)])
+        assert isinstance(result, schema)
+        return result
+
+    async def acomplete(self, *, system: str, user: str, role: str = "util") -> str:
+        result = await self._models["fast"].ainvoke([("system", system), ("human", user)])
+        return str(getattr(result, "content", result))
+
 
 class FakeStructuredLLM(StructuredLLM):
     """Deterministic responses. Pass ``overrides={role: [obj, ...]}`` to script
@@ -106,6 +128,12 @@ class FakeStructuredLLM(StructuredLLM):
         if not snippet and user.strip():
             snippet = user.strip().splitlines()[-1]
         return f"Context: {' '.join(snippet.split()[:12])}".strip()
+
+    async def agenerate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
+        return self.generate(system=system, user=user, schema=schema, role=role)
+
+    async def acomplete(self, *, system: str, user: str, role: str = "util") -> str:
+        return self.complete(system=system, user=user, role=role)
 
 
 def _field(text: str, label: str) -> str:

@@ -10,9 +10,9 @@ from praxis.graph.state import DossierState
 from praxis.schemas import ResearchPlan
 
 
-def planner(state: DossierState, config: RunnableConfig) -> dict:
+async def planner(state: DossierState, config: RunnableConfig) -> dict:
     llm = llm_from(config)
-    plan = llm.generate(
+    plan = await llm.agenerate(
         system=PLANNER,
         user=f"Subject: {state['subject']}\nDepth: {state['depth']}",
         schema=ResearchPlan,

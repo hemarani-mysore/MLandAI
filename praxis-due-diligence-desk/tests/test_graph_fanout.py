@@ -1,7 +1,6 @@
 """Researcher fan-out via `Send` — dispatch shape and observed concurrency."""
 
-import threading
-import time
+import asyncio
 
 from praxis.graph import run_dossier
 from praxis.graph.nodes.researcher import ResearchTask, dispatch_gap_fill, dispatch_research
@@ -44,27 +43,29 @@ def test_dispatch_gap_fill_emits_one_send_per_follow_up():
 
 
 class _ConcurrencyTrackingLLM(FakeStructuredLLM):
-    """Records how many `generate` calls for role="researcher" are in flight at
-    once. A small sleep (releases the GIL) makes real thread overlap visible."""
+    """Records how many `agenerate` calls for role="researcher" are in flight
+    at once. `asyncio.sleep` yields to the event loop, so overlap here proves
+    the branches genuinely interleave on the loop — a blocking `time.sleep`
+    would serialize everything and always read back 1."""
 
     def __init__(self, *, delay: float = 0.05) -> None:
         super().__init__()
         self._delay = delay
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._in_flight = 0
         self.max_in_flight = 0
 
-    def generate(self, *, system, user, schema, role):  # type: ignore[override]
+    async def agenerate(self, *, system, user, schema, role):  # type: ignore[override]
         if role != "researcher":
-            return super().generate(system=system, user=user, schema=schema, role=role)
-        with self._lock:
+            return await super().agenerate(system=system, user=user, schema=schema, role=role)
+        async with self._lock:
             self._in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self._in_flight)
         try:
-            time.sleep(self._delay)
-            return super().generate(system=system, user=user, schema=schema, role=role)
+            await asyncio.sleep(self._delay)
+            return self.generate(system=system, user=user, schema=schema, role=role)
         finally:
-            with self._lock:
+            async with self._lock:
                 self._in_flight -= 1
 
 

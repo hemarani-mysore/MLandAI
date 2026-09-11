@@ -14,9 +14,9 @@ from praxis.graph.state import DossierState
 from praxis.schemas import RedTeamReport
 
 
-def red_team(state: DossierState, config: RunnableConfig) -> dict:
+async def red_team(state: DossierState, config: RunnableConfig) -> dict:
     llm = llm_from(config)
-    report = llm.generate(
+    report = await llm.agenerate(
         system=RED_TEAM,
         user=(
             f"Subject: {state['subject']}\n\n"
