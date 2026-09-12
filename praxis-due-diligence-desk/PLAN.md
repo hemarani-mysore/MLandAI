@@ -111,7 +111,7 @@ tests cover the happy path, the gap-fill loop, and citation-integrity flagging.
 - Deferred to Phase 2: the ingestion **worker/queue**, VLM table extraction,
   Postgres.
 
-### Phase 2 — Multi-agent for real (~1 week) — shipping in 5 slices
+### Phase 2 — Multi-agent for real (~1 week) — done, shipped in 5 slices
 
 **Slice 1 done:** real system prompts; multi-section editor (one section per
 rubric item, kills the "low rubric coverage" flag); `evidence_refs` populated +
@@ -156,10 +156,30 @@ smoke test surfaced a real gap outside this slice's own code: `memo_structure_ev
 never pinned `llm=FakeStructuredLLM()`, so running it standalone (outside
 pytest) silently used whatever `.env` set — fixed.
 
-Remaining slices:
-- Ingestion **worker** (arq) + `POST /corpus/jobs`; `praxis-worker` service.
-- SSE endpoint streaming `graph.astream_events` → frontend shows each node glowing
-  with its reasoning steps (Argus UX); persist `RunEvent`s alongside it.
+**Slice 5 done (Phase 2 complete):** `GET /dossiers/stream` — `astream_events`
+filtered to the 7 real node names (LangGraph also wraps the conditional-edge
+router functions under the *calling* node's metadata; filtering on
+`event["name"]` avoids double-counting), emitting `node_start`/`node_end`/
+`complete`/`error` SSE frames and persisting each as a `RunEvent`
+(`GET /dossiers/{id}/events` replays them — the final state comes from
+`graph.aget_state(...)` post-completion, not hand-merged partials). Ingestion
+worker: `arq` + `fakeredis`-tested `POST /corpus/jobs` / `GET /corpus/jobs/{id}`
+(`ingest_task` off the event loop via `asyncio.to_thread`, same reasoning as
+`research_one`'s retrieval call). Getting `arq` to run fully in-process against
+`fakeredis` (no real Redis on this machine or in CI) took two real workarounds
+— `ArqRedis(pool_or_conn=FakeRedis().connection_pool)` sidesteps a fakeredis
+kwarg-introspection bug, and `arq.worker.log_redis_info` (which runs `INFO`,
+not implemented in this fakeredis) is patched out for burst-worker test runs
+only. Also retrofitted slice 4: checkpointing was silently logging
+"unregistered type" warnings for our own Pydantic schema classes (LangGraph's
+serializer only allow-lists a fixed stdlib/langchain set); new
+`graph/checkpoint.py::open_checkpointer()` fixes it once, used everywhere.
+`docker-compose.yml` gained `redis` + `worker` services — reviewed, not run
+(no Docker here, same as every earlier deploy-adjacent slice). One real-provider
+run hit a ~16-minute OpenAI streaming hang inside `astream_events` before
+timing out — the endpoint degraded correctly (persisted `failed`, emitted an
+`error` frame, no server-wide impact); tuning that timeout is future hardening,
+not attempted here.
 
 ### Phase 3 — MCP (~3 days)
 - `src/praxis/mcp/server.py` (FastMCP): tools `create_dossier`, `search_corpus`,

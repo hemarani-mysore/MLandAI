@@ -19,7 +19,7 @@ CI, Docker/Kubernetes — in one coherent project.
 |---|---|---|
 | **0 — Scaffold** | repo layout, LangGraph skeleton (7 nodes, gap-fill loop), FastAPI + CLI, deterministic `fake` LLM, Docker, CI (lint + type + test) | ✅ **done** |
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
-| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · researcher fan-out via `Send`, bounded concurrency *(slice 2 ✅)* · async graph end to end *(slice 3 ✅)* · run persistence + checkpointing *(slice 4 ✅)* · SSE, ingestion worker *(slice 5 ⬜)* | 🟡 **in progress** |
+| **2 — Multi-agent** | real prompts + multi-section editor + deterministic recommendation; researcher fan-out via `Send`; async graph end to end; run persistence + checkpointing; SSE streaming + ingestion worker | ✅ **done** |
 | 3 — MCP | `praxis-mcp` FastMCP server (tools/resources/prompts); agents consume external MCP tools | ⬜ |
 | 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
@@ -48,12 +48,21 @@ curl -s -XPOST localhost:8000/dossiers.md -H 'content-type: application/json' \
 # Every dossier run is persisted — list past runs, fetch one by id
 curl -s localhost:8000/dossiers
 curl -s localhost:8000/dossiers/<id>
+
+# Watch a run node by node instead of waiting for one response
+curl -N "localhost:8000/dossiers/stream?subject=Acme%20Robotics"
+curl -s localhost:8000/dossiers/<id>/events   # the same events, replayed
+
+# Ingestion can run on a worker instead of blocking the request (needs Redis —
+# docker compose provides one; `uv run arq praxis.worker.WorkerSettings` for a bare run)
+curl -s -XPOST localhost:8000/corpus/jobs -d '{"text":"...","title":"..."}'
+curl -s localhost:8000/corpus/jobs/<job_id>
 ```
 
 Real models: set `PRAXIS_LLM_PROVIDER=openai|anthropic|nebius` and
 `PRAXIS_EMBEDDING_PROVIDER=openai|nebius` with the matching key in `.env`
 (see [`.env.example`](.env.example)). `docker compose up --build` brings up the
-API + a real Qdrant.
+API + worker + Redis + a real Qdrant.
 
 ```bash
 make check           # lint + type + test + eval gates (what CI runs)
@@ -98,6 +107,17 @@ technically resumable even though nothing exposes "resume" yet. Real
 migrations (Alembic) and Postgres land in Phase 5 with the rest of the deploy
 story; for now the schema is created with `Base.metadata.create_all()`.
 
+## Streaming & the ingestion worker
+
+`GET /dossiers/stream?subject=&depth=` runs the same graph but streams
+`node_start` / `node_end` (with that node's output) / `complete` /
+`error` frames over SSE as they happen (`graph.astream_events`), persisting
+each as a `RunEvent` — `GET /dossiers/{id}/events` replays them afterwards.
+Ingestion can also run on an **arq** worker instead of the request path:
+`POST /corpus/jobs` enqueues, `GET /corpus/jobs/{id}` polls. `docker compose
+up` provides Redis + the worker service; a bare local run needs its own Redis
+(or `PRAXIS_REDIS_URL` pointed at one) — nothing else in the project needs it.
+
 ## Retrieval
 
 ```
@@ -117,12 +137,13 @@ paths don't change.
 ```
 src/praxis/
   config.py schemas.py llm.py render.py cli.py
-  graph/  state.py build.py prompts.py context.py recommend.py  nodes/{planner,researcher,analysts,red_team,editor,verifier}.py
+  graph/  state.py build.py prompts.py context.py recommend.py checkpoint.py  nodes/{planner,researcher,analysts,red_team,editor,verifier}.py
   rag/    parse.py chunk.py contextual.py embed.py bm25.py vector_store.py fuse.py rerank.py corpus.py retrieve.py ingest.py
-  api/    main.py deps.py
-  db/     models.py session.py         # DossierRun, async SQLAlchemy engine/session
+  api/    main.py deps.py sse.py
+  db/     models.py session.py         # DossierRun, RunEvent, async SQLAlchemy engine/session
+  worker/ __init__.py                  # arq ingest_task + WorkerSettings
   obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 73 tests: graph, fan-out, async, checkpointing, db, api runs, retrieval, cli, schemas
+tests/                                 # 82 tests: graph, fan-out, async, checkpointing, db, api runs, sse, jobs, worker, retrieval, cli, schemas
 evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests

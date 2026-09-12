@@ -30,6 +30,39 @@ from praxis.schemas import PLACEHOLDER_SOURCE_IDS, DossierRequest, DossierRespon
 if TYPE_CHECKING:
     from praxis.rag import Corpus
 
+# The real graph nodes — used by api/sse.py to isolate genuine node execution
+# from LangGraph's internal wrapping of the conditional-edge router functions
+# (dispatch_research, route_after_red_team), which also emit on_chain_start/
+# on_chain_end events, attributed to the *calling* node's metadata.
+NODE_NAMES = frozenset(
+    {"planner", "research_one", "bull", "bear", "red_team", "editor", "verifier"}
+)
+
+
+def to_response(request: DossierRequest, final: DossierState) -> DossierResponse:
+    """Build the API response from a finished run's state — shared by
+    ``arun_dossier`` (the `ainvoke` return value) and the SSE streaming path
+    (``graph.aget_state(...).values``, once the checkpointed run reaches END)."""
+    assert final["plan"] is not None
+    assert final["memo"] is not None
+    assert final["verification"] is not None
+    sources = sorted(
+        {
+            ev.citation.source_id
+            for ev in final["evidence"]
+            if ev.citation.source_id not in PLACEHOLDER_SOURCE_IDS
+        }
+    )
+    return DossierResponse(
+        request=request,
+        plan=final["plan"],
+        memo=final["memo"],
+        verification=final["verification"],
+        evidence_count=len(final["evidence"]),
+        iterations=final["iteration"],
+        sources=sources,
+    )
+
 
 @lru_cache
 def build_graph(checkpointer: BaseCheckpointSaver | None = None):
@@ -123,23 +156,7 @@ async def arun_dossier(
         initial_state(request.subject, request.depth),
         config={"configurable": configurable, "max_concurrency": concurrency},
     )
-
-    sources = sorted(
-        {
-            ev.citation.source_id
-            for ev in final["evidence"]
-            if ev.citation.source_id not in PLACEHOLDER_SOURCE_IDS
-        }
-    )
-    return DossierResponse(
-        request=request,
-        plan=final["plan"],
-        memo=final["memo"],
-        verification=final["verification"],
-        evidence_count=len(final["evidence"]),
-        iterations=final["iteration"],
-        sources=sources,
-    )
+    return to_response(request, final)
 
 
 def run_dossier(

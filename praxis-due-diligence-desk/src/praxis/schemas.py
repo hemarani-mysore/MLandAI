@@ -153,3 +153,31 @@ class DossierRunRecord(BaseModel):
     verification: VerificationReport | None = None
     sources: list[str] = Field(default_factory=list)
     error: str | None = None
+
+
+class RunEventOut(BaseModel):
+    """One persisted `RunEvent` — `GET /dossiers/{id}/events`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    kind: Literal["node_start", "node_end", "complete", "error"]
+    node: str | None = None
+    payload: dict | None = None
+    created_at: datetime
+
+
+class JobEnqueued(BaseModel):
+    """`POST /corpus/jobs` — the ingestion job was queued."""
+
+    job_id: str
+
+
+class JobStatusOut(BaseModel):
+    """`GET /corpus/jobs/{id}` — current status of a queued ingestion job."""
+
+    job_id: str
+    status: Literal["deferred", "queued", "in_progress", "complete"]
+    success: bool | None = None
+    result: dict | None = None
+    error: str | None = None

@@ -7,11 +7,13 @@ os.environ.setdefault("PRAXIS_CHECKPOINT_DB_PATH", ":memory:")  # never touch a 
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
+from arq.connections import ArqRedis  # noqa: E402
+from fakeredis.aioredis import FakeRedis, FakeServer  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from praxis.api.deps import corpus_dep, db_session_dep  # noqa: E402
+from praxis.api.deps import corpus_dep, db_session_dep, redis_dep  # noqa: E402
 from praxis.api.main import app  # noqa: E402
 from praxis.db import Base  # noqa: E402
 from praxis.rag import clear_cache  # noqa: E402
@@ -67,15 +69,31 @@ async def db_session():
     await engine.dispose()
 
 
+@pytest_asyncio.fixture
+async def redis_pool():
+    """A fakeredis-backed ArqRedis, per test — no real Redis needed. Plain
+    `FakeRedis(client_class=ArqRedis)` breaks (fakeredis's kwarg-introspection
+    helper chokes on ArqRedis's custom `__init__`); building a plain FakeRedis
+    first and handing ArqRedis its connection pool works around that."""
+    fake = FakeRedis(server=FakeServer())
+    redis = ArqRedis(pool_or_conn=fake.connection_pool)
+    yield redis
+    await redis.aclose()
+
+
 @pytest.fixture
-def client(corpus, db_session):
-    """A TestClient with the corpus and DB dependencies swapped for isolated,
-    per-test fakes — shared by every API test module."""
+def client(corpus, db_session, redis_pool):
+    """A TestClient with the corpus, DB, and redis dependencies swapped for
+    isolated, per-test fakes — shared by every API test module."""
     app.dependency_overrides[corpus_dep] = lambda: corpus
 
     async def _db_override():
         yield db_session
 
+    async def _redis_override():
+        yield redis_pool
+
     app.dependency_overrides[db_session_dep] = _db_override
+    app.dependency_overrides[redis_dep] = _redis_override
     yield TestClient(app)
     app.dependency_overrides.clear()

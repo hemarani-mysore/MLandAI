@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     database_url: str = ""  # empty -> sqlite+aiosqlite:///./praxis.db (dev/CI); Postgres in Phase 5
     checkpoint_db_path: str = "./praxis_checkpoints.db"  # LangGraph checkpointer, own SQLite file
 
+    # --- Ingestion worker ---
+    redis_url: str = "redis://localhost:6379"  # the arq job queue
+
     # --- Observability ---
     otel_enabled: bool = False
 

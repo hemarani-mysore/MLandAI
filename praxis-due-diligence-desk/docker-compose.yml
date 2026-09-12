@@ -1,9 +1,18 @@
-# Phase 1: API + Qdrant. Runs with the `fake` LLM + hashing embedder (no keys).
+# Phase 2: API + Qdrant + Redis + an ingestion worker. Runs with the `fake` LLM
+# + hashing embedder (no keys).
 #   docker compose up --build
 #   curl -s localhost:8000/corpus/stats
 #   curl -s -XPOST localhost:8000/dossiers.md -d '{"subject":"Acme Robotics"}'
+#   curl -s -XPOST localhost:8000/corpus/jobs -d '{"text":"...", "title":"..."}'
 #
-# Phase 2 adds: postgres (dossier + run history) and a worker for ingestion.
+# IMPORTANT: api and worker share a corpus only because both point at the same
+# PRAXIS_QDRANT_URL (a real Qdrant server, below) — they're separate processes,
+# so with the in-memory default each would have its own empty corpus (the same
+# gotcha as running `praxis ingest` then `praxis search` as two separate CLI
+# invocations).
+#
+# Phase 5 adds: Postgres (replaces SQLite for PRAXIS_DATABASE_URL) + Alembic
+# migrations, per-service Dockerfiles, k8s manifests.
 services:
   api:
     build: .
@@ -13,17 +22,44 @@ services:
       PRAXIS_LLM_PROVIDER: ${PRAXIS_LLM_PROVIDER:-fake}
       PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
       PRAXIS_QDRANT_URL: http://qdrant:6333
+      PRAXIS_REDIS_URL: redis://redis:6379
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
     depends_on:
       qdrant:
         condition: service_started
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 30s
       timeout: 3s
       retries: 3
+
+  worker:
+    build: .
+    command: ["arq", "praxis.worker.WorkerSettings"]
+    environment:
+      PRAXIS_LLM_PROVIDER: ${PRAXIS_LLM_PROVIDER:-fake}
+      PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
+      PRAXIS_QDRANT_URL: http://qdrant:6333
+      PRAXIS_REDIS_URL: redis://redis:6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    deploy:
+      replicas: 1  # the ingestion queue isn't sharded yet — one replica only
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
   qdrant:
     image: qdrant/qdrant:v1.12.4

@@ -137,7 +137,7 @@ loop once, and passed verification clean (0% hallucination, 100% coverage).
 
 ---
 
-## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 4/5 done  (~1 week)
+## Phase 2 — Multi-agent for real  ·  ✅ done — 5/5 slices  (~1 week)
 
 **Goal:** real prompts + few-shots, parallel researcher fan-out, a multi-section
 editor, run persistence + checkpointing, SSE streaming, ingestion worker.
@@ -155,7 +155,12 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
    `GET /dossiers[/{id}]`; each run is also checkpointed (`AsyncSqliteSaver`,
    its own SQLite file) under `thread_id = run.id`. Alembic + Postgres +
    `RunEvent` deferred — see the step-6 note below.
-5. ⬜ SSE streaming + ingestion worker (steps 7–8).
+5. ✅ **SSE streaming + ingestion worker** — `GET /dossiers/stream` emits
+   `node_start`/`node_end`/`complete`/`error` frames from `astream_events`,
+   persisting each as a `RunEvent` (`GET /dossiers/{id}/events` replays them);
+   `arq` + `fakeredis`-tested ingestion worker (`POST /corpus/jobs` /
+   `GET /corpus/jobs/{id}`). Also retrofitted slice 4's checkpointer to
+   allow-list our own schema types — see the step-8 note below.
 
 ### Steps
 
@@ -264,17 +269,61 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
      whatever `PRAXIS_LLM_PROVIDER` `.env` set — real API calls from a
      "deterministic, no-LLM" CI gate. Fixed: pinned explicitly.
 
-7. **Ingestion worker** — `src/praxis/worker/`
-   - Dep: `arq` + `redis`. `ingest_task(payload)` wraps `ingest_source`.
-   - `POST /corpus/jobs` enqueues → `{job_id}`; `GET /corpus/jobs/{id}` → status.
-   - Keep sync `POST /corpus/documents` for small inline docs.
-   - `docker-compose.yml`: add `redis` + a `worker` service (replicas: 1).
+7. **Ingestion worker** — `src/praxis/worker/`  ✅ *(slice 5)*
+   - Deps: `arq` (runtime), `fakeredis` (dev only — no real Redis on this
+     machine, or in CI). `ingest_task(ctx, *, text, path, title)` wraps
+     `ingest_source` via `asyncio.to_thread` (a real embedder blocks on HTTP).
+   - `POST /corpus/jobs` enqueues → `{job_id}`; `GET /corpus/jobs/{id}` → status
+     (`arq.jobs.Job`, 404 on `not_found`). Kept sync `POST /corpus/documents`
+     for small inline docs.
+   - `docker-compose.yml`: added `redis:7-alpine` + a `worker` service
+     (`replicas: 1` — the queue isn't sharded). **Not runnable here** (no
+     Docker on this machine, same limitation as every earlier Docker-touching
+     slice) — reviewed for correctness, not executed. Comment in the file
+     flags the real gotcha: api and worker only share a corpus when both point
+     at the same **real** `PRAXIS_QDRANT_URL` — with the in-memory default
+     they're two separate processes with two separate empty corpora.
+   - `arq` + `fakeredis` in-process has two real gotchas, both worked around
+     (see `tests/conftest.py::redis_pool` and `tests/test_worker.py`):
+     `FakeRedis(client_class=ArqRedis)` breaks fakeredis's kwarg introspection
+     (fix: build a plain `FakeRedis`, hand `ArqRedis` its `connection_pool`);
+     `Worker.main()` unconditionally calls `arq.worker.log_redis_info()` →
+     `INFO`, which this fakeredis version doesn't implement (fix: patch it out
+     for the burst-worker test runs only — a real deployment never hits this).
 
-8. **SSE streaming** — `src/praxis/api/sse.py`
+8. **SSE streaming** — `src/praxis/api/sse.py`  ✅ *(slice 5)*
    - `GET /dossiers/stream?subject=&depth=` → `text/event-stream` from
-     `graph.astream_events(version="v2")`.
-   - Events: `node_start {node}`, `node_end {node, reasoning_steps, partial}`,
-     `complete {DossierResponse}`, `error {message}`. Persist each as a `RunEvent`.
+     `graph.astream_events(version="v2")`, filtered to the 7 real node names
+     (LangGraph also wraps the conditional-edge router functions in
+     `on_chain_start`/`on_chain_end`, attributed to the *calling* node —
+     filtering on `event["name"]`, not `metadata.langgraph_node`, avoids
+     double-counting).
+   - Events: `node_start {node}`, `node_end {node, partial}` (partial = the
+     node's output dict, `BaseModel`/`list[BaseModel]` values serialized via
+     `model_dump(mode="json")`), `complete {DossierResponse}`, `error
+     {message}`. Every frame is persisted as a `RunEvent`
+     (`GET /dossiers/{id}/events` replays them, ordered by `seq` — a small
+     addition beyond the acceptance criteria, since otherwise `RunEvent` would
+     be write-only). The final state comes from `graph.aget_state(...)` after
+     the checkpointed run reaches `END`, not from re-merging partials by hand.
+   - **Retrofit, found while building this:** checkpointing any `DossierState`
+     was logging `Deserializing unregistered type praxis.schemas.ResearchPlan
+     from checkpoint. This will be blocked in a future version` —
+     `JsonPlusSerializer` only allow-lists a fixed stdlib/langchain set by
+     default. New `graph/checkpoint.py::open_checkpointer()` configures a
+     `JsonPlusSerializer(allowed_msgpack_modules=[...])` with our schema
+     classes and is now the single way a checkpointer gets opened — slice 4's
+     `POST /dossiers` path switched to it too. Verified with a `caplog` test
+     that fails without the fix (confirmed by temporarily reverting it).
+   - **Known real-provider risk, not fixed here:** `astream_events` appears to
+     force the underlying chat model onto its streaming code path even though
+     nodes only ever call `.ainvoke()`. One real run hit langchain-openai's
+     `stream_chunk_timeout` after ~16 minutes on a stalled OpenAI response
+     (dead TCP-layer connection, no data) — the endpoint degraded correctly
+     (an `error` frame, the run marked `failed`, no server crash or hang for
+     other requests) but a single stuck node can take a long time to
+     self-resolve. Tuning `stream_chunk_timeout` / a request-level timeout is
+     future hardening (Phase 4/5), not attempted in this slice.
 
 ### Acceptance criteria
 
@@ -294,10 +343,14 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 - [x] a checkpointer actually writes checkpoints under the run's thread_id,
       not just accepted silently  *(slice 4, `test_graph_checkpointing.py`)*
 - [x] CI green using SQLite  *(slice 4 — fakeredis is slice 5's worker, not this)*
-- [ ] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`  *(slice 5)*
-- [ ] `POST /corpus/jobs` → poll → `succeeded`, `GET /corpus/stats` shows growth  *(slice 5)*
-- [ ] CI green using fakeredis; `docker compose up` brings up
-      api + worker + redis + qdrant, all healthy  *(slice 5)*
+- [x] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`
+      *(slice 5, `test_api_sse.py`)*
+- [x] `POST /corpus/jobs` → poll → `succeeded`, `GET /corpus/stats` shows growth
+      *(slice 5, `test_api_jobs.py`)*
+- [x] CI green using fakeredis  *(slice 5, `test_worker.py` + `test_api_jobs.py`)*
+- [ ] `docker compose up` brings up api + worker + redis + qdrant, all healthy —
+      **not verified**: no Docker on this machine. `docker-compose.yml` is
+      written and reviewed but has never actually been run, here or in CI.
 
 ### Tests to perform
 
@@ -305,16 +358,16 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 |---|---|---|
 | unit | `test_graph_fanout.py` | `dispatch_research` emits N `Send`s; `evidence` accumulates across branches; concurrency cap respected |
 | unit | `test_editor_multisection.py` | 6 `MemoSection`s; citations resolve to `evidence_refs`; recommendation logic (thin evidence → `insufficient_evidence`) |
-| unit | `test_db_models.py` ✅ | `DossierRun` round-trips on SQLite incl. JSON columns; defaults; ordering. `RunEvent` deferred to slice 5 |
-| unit | `test_graph_checkpointing.py` ✅ *(slice 4, not in the original table)* | a checkpointed run's state is retrievable by `thread_id`; distinct threads don't share state; opt-in (no checkpointer → no thread_id needed) |
-| unit | `test_worker.py` | `ingest_task` grows the corpus (arq test harness + fakeredis) |
+| unit | `test_db_models.py` ✅ | `DossierRun` round-trips on SQLite incl. JSON columns; defaults; ordering. `RunEvent` covered via `test_api_sse.py` instead (nothing writes one outside a stream) |
+| unit | `test_graph_checkpointing.py` ✅ *(slice 4, extended in slice 5)* | a checkpointed run's state is retrievable by `thread_id`; distinct threads don't share state; opt-in (no checkpointer → no thread_id needed); `open_checkpointer` allow-lists our schema types (no "unregistered type" log warning — `caplog`) |
+| unit | `test_worker.py` ✅ | `ingest_task` grows the corpus and returns the `IngestResult`; a task with no input fails cleanly (arq burst `Worker` + fakeredis) |
 | integration | `test_api_runs.py` ✅ | `POST /dossiers` persists; `GET /dossiers/{id}` + list, newest-first, `limit`, unknown id → 404 |
-| integration | `test_api_sse.py` | stream yields ordered node events ending in `complete` (TestClient SSE) |
-| integration | `test_api_jobs.py` | enqueue → status transitions → corpus updated |
-| regression | existing 41 | updated for async where signatures change; still green |
-| eval | `make eval-rag-gate` + `make eval-structure-gate` | retrieval unchanged; memo structure gate passes, fails on a corrupted canned memo |
-| smoke | `make demo` | full 6-section grounded memo, verifier PASS |
-| smoke | `docker compose up` then `curl -N localhost:8000/dossiers/stream?subject=Acme%20Robotics` | node events stream live |
+| integration | `test_api_sse.py` ✅ | stream yields ≥ 7 `node_start`/`node_end` frames ending in `complete`; the run + its events are persisted and match; a short `subject` is rejected (`TestClient` SSE) |
+| integration | `test_api_jobs.py` ✅ | enqueue → poll (`deferred`/`queued`) → drain with an inline burst worker → poll (`complete`) → `/corpus/stats` grew; missing input → 422; unknown job → 404. Runs as `httpx.AsyncClient` over the ASGI app directly, not the shared sync `client` — draining fakeredis with an inline burst worker needs to share the *same* event loop as the HTTP calls |
+| regression | existing 41 | ✅ all pass unchanged (82 total as of slice 5) |
+| eval | `make eval-rag-gate` + `make eval-structure-gate` | ✅ retrieval unchanged; memo structure gate passes, fails on a corrupted canned memo |
+| smoke | `make demo` | ✅ full 6-section grounded memo, verifier PASS |
+| smoke | `docker compose up` then `curl -N localhost:8000/dossiers/stream?subject=Acme%20Robotics` | **not run** — no Docker here. The equivalent smoke test (`uv run uvicorn` + `curl -N`) was run manually and worked: real node events streaming live, persisted run + events matching |
 
 ---
 
@@ -610,8 +663,9 @@ tracing + cost accounting; an expanded CI eval gate + a nightly full run.
 | `PRAXIS_RETRIEVAL_K` | `6` | 1 | |
 | `PRAXIS_RERANKER` | `lexical` | 1 | `lexical` / `cross-encoder` / `none` |
 | `PRAXIS_RESEARCH_CONCURRENCY` | `4` | 2 | parallel researcher branches |
-| `PRAXIS_DATABASE_URL` | *(empty)* | 2 | empty → SQLite file |
-| `REDIS_URL` | `redis://localhost:6379` | 2 | ingestion queue |
+| `PRAXIS_DATABASE_URL` | *(empty)* | 2 | empty → `sqlite+aiosqlite:///./praxis.db` |
+| `PRAXIS_CHECKPOINT_DB_PATH` | `./praxis_checkpoints.db` | 2 | LangGraph checkpointer, its own SQLite file |
+| `PRAXIS_REDIS_URL` | `redis://localhost:6379` | 2 | the arq ingestion queue |
 | `PRAXIS_MCP_SERVERS` | *(empty)* | 3 | JSON map of external MCP servers |
 | `PRAXIS_OTEL_ENABLED` | `false` | 4 | |
 | `PRAXIS_OTEL_ENDPOINT` | *(empty)* | 4 | OTLP collector |
@@ -627,8 +681,10 @@ make check          # lint + type + test + eval gates  (CI parity)
 make demo           # ingest fixture corpus, run a grounded dossier
 make api            # uvicorn on :8000
 
-make eval-rag       # retrieval eval report
-make eval-rag-gate  # retrieval eval as a pass/fail gate
+make eval-rag             # retrieval eval report
+make eval-rag-gate        # retrieval eval as a pass/fail gate
+make eval-structure       # memo-structure eval report
+make eval-structure-gate  # memo-structure eval as a pass/fail gate
 # Phase 4:
 make eval-dev       # judge-vs-expert F1, dev split
 make eval-test      # gated memo eval, recorded slice
@@ -637,6 +693,7 @@ make eval           # full suite -> evals/reports/<ts>.json
 praxis run "<subject>" [--depth quick|standard|deep] [--ingest PATH...] [--json]
 praxis ingest PATH...
 praxis search "<query>" [-k N]
+uv run arq praxis.worker.WorkerSettings   # run the ingestion worker (needs Redis)
 # Phase 3:
 praxis mcp          # run the MCP stdio server
 ```
