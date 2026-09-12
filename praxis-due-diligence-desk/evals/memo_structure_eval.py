@@ -24,6 +24,7 @@ from typing import get_args
 
 from praxis.graph import run_dossier
 from praxis.graph.nodes.verifier import verifier
+from praxis.llm import FakeStructuredLLM
 from praxis.rag import ingest_source
 from praxis.rag.corpus import Corpus
 from praxis.rag.embed import HashEmbedder
@@ -70,7 +71,13 @@ def _checks(memo: DossierMemo, v: VerificationReport) -> list[tuple[str, bool]]:
 
 
 def _real_run() -> tuple[DossierMemo, VerificationReport]:
-    resp = run_dossier(DossierRequest(subject="Acme Robotics"), corpus=_corpus())
+    # llm=FakeStructuredLLM() explicitly — this gate must stay deterministic and
+    # offline regardless of PRAXIS_LLM_PROVIDER in the ambient environment/.env
+    # (a real-provider .env is normal on a dev machine once you've run real
+    # dossiers; this script must not silently start spending real API calls).
+    resp = run_dossier(
+        DossierRequest(subject="Acme Robotics"), llm=FakeStructuredLLM(), corpus=_corpus()
+    )
     return resp.memo, resp.verification
 
 

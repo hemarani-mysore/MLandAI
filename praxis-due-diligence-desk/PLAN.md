@@ -138,12 +138,28 @@ doesn't stall other concurrent branches. Verified with an asyncio-native
 concurrency test (the slice-2 thread-based one no longer proved anything once
 branches moved off threads) and a real gpt-4o run through the live API route.
 
+**Slice 4 done:** every `POST /dossiers` is now a persisted `DossierRun`
+(async SQLAlchemy, SQLite) queryable via `GET /dossiers[/{id}]`, and
+checkpointed (`AsyncSqliteSaver`, its own SQLite file) under `thread_id =
+run.id` — technically resumable, though nothing consumes that yet. Scope
+narrowed from the original wording: Alembic + Postgres deferred to Phase 5
+(one table with no migration history doesn't earn Alembic's complexity yet;
+`Base.metadata.create_all()` covers SQLite for now), `RunEvent` deferred to
+slice 5 (nothing populates it until SSE streaming exists). De-risked with
+direct runtime probes before writing the real code — bare `sqlalchemy` doesn't
+pull `greenlet` (needed at runtime, not caught by import-time checks), plain
+`:memory:` SQLite gives each pooled connection its own empty DB without
+`StaticPool`, and a bare `TestClient(app)` (this project's existing fixture
+pattern) never runs FastAPI's `lifespan` — so DB/checkpointer access stayed a
+plain `@lru_cache` singleton + per-call open, not `app.state`. A real-provider
+smoke test surfaced a real gap outside this slice's own code: `memo_structure_eval.py`
+never pinned `llm=FakeStructuredLLM()`, so running it standalone (outside
+pytest) silently used whatever `.env` set — fixed.
+
 Remaining slices:
-- `MemorySaver`/`PostgresSaver` checkpointer → resumable runs; run history
-  (SQLite dev / Postgres prod); `GET /dossiers[/{id}]`.
 - Ingestion **worker** (arq) + `POST /corpus/jobs`; `praxis-worker` service.
 - SSE endpoint streaming `graph.astream_events` → frontend shows each node glowing
-  with its reasoning steps (Argus UX).
+  with its reasoning steps (Argus UX); persist `RunEvent`s alongside it.
 
 ### Phase 3 — MCP (~3 days)
 - `src/praxis/mcp/server.py` (FastMCP): tools `create_dossier`, `search_corpus`,

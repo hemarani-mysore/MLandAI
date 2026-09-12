@@ -137,7 +137,7 @@ loop once, and passed verification clean (0% hallucination, 100% coverage).
 
 ---
 
-## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 3/5 done  (~1 week)
+## Phase 2 — Multi-agent for real  ·  🟡 in progress — slice 4/5 done  (~1 week)
 
 **Goal:** real prompts + few-shots, parallel researcher fan-out, a multi-section
 editor, run persistence + checkpointing, SSE streaming, ingestion worker.
@@ -150,7 +150,11 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 3. ✅ **Async graph** — every LLM-calling node is `async def`; `arun_dossier` is
    the primary entry point, `run_dossier` a thin sync wrapper; the API calls
    `arun_dossier` directly (async end to end, no worker-thread-per-request).
-4. ⬜ Run persistence + checkpointing, SQLite (step 6, `GET /dossiers[/{id}]`).
+4. ✅ **Run persistence + checkpointing** — every `POST /dossiers` is a
+   `DossierRun` row (SQLite via async SQLAlchemy), queryable via
+   `GET /dossiers[/{id}]`; each run is also checkpointed (`AsyncSqliteSaver`,
+   its own SQLite file) under `thread_id = run.id`. Alembic + Postgres +
+   `RunEvent` deferred — see the step-6 note below.
 5. ⬜ SSE streaming + ingestion worker (steps 7–8).
 
 ### Steps
@@ -222,18 +226,43 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
      call `arun_dossier` directly (never the sync wrapper) — async end to end,
      so a slow dossier run no longer ties up one of FastAPI's worker threads.
 
-6. **Run persistence + checkpointing** — `src/praxis/db/`
-   - Deps: `sqlalchemy>=2`, `psycopg[binary]`, `alembic`, `langgraph-checkpoint-postgres`.
-   - Models: `DossierRun` (id, subject, depth, status, created/finished, memo
-     JSON, verification JSON, sources, cost_usd, tokens), `RunEvent`
-     (run_id, seq, node, ts, payload JSON).
-   - `PRAXIS_DATABASE_URL` empty → SQLite file (dev/CI); else Postgres.
-   - Compile the graph with a checkpointer (`MemorySaver` for SQLite,
-     `PostgresSaver` otherwise); `thread_id = run_id`.
-   - `alembic init`, first migration; `alembic upgrade head` on API startup
-     (guarded) or documented as a deploy step.
-   - API: `GET /dossiers` (list), `GET /dossiers/{id}` (one run), keep
-     `POST /dossiers` (now persists).
+6. **Run persistence + checkpointing** — `src/praxis/db/`  ✅ *(slice 4, scope
+   narrowed — see below)*
+   - Deps actually used: `sqlalchemy[asyncio]>=2` (bare `sqlalchemy` does **not**
+     pull `greenlet`, which the async engine needs at runtime — confirmed by
+     probe, not assumed), `aiosqlite>=0.20`, `langgraph-checkpoint-sqlite>=2`.
+   - Model shipped: `DossierRun` (id uuid4, subject, depth, status
+     `running|succeeded|failed`, created/finished, `memo` JSON, `verification`
+     JSON, `sources` JSON, `error`). `cost_usd`/`tokens` wait for Phase 4's
+     token accounting; `RunEvent` waits for slice 5 (nothing populates it
+     until `astream_events` exists).
+   - `PRAXIS_DATABASE_URL` empty → `sqlite+aiosqlite:///./praxis.db`.
+     **Deferred to Phase 5** (alongside real Postgres): `PostgresSaver`, and
+     Alembic (`alembic init` + migrations) — one table with no migration
+     history yet doesn't earn that complexity; schema is created via
+     `Base.metadata.create_all()` (`ensure_schema()`, idempotent, guarded to
+     run once). Real migrations land when there's an actual deploy target.
+   - Checkpointer: `AsyncSqliteSaver`, opened per dossier run from its own
+     SQLite file (`PRAXIS_CHECKPOINT_DB_PATH`, separate from the app's own
+     tables — two libraries writing to one SQLite file was judged not worth
+     the risk for the file-locking upside of merging them); `thread_id =
+     run.id`, so a run's checkpoint history and its DB row share an id.
+   - Engine/sessionmaker are a plain `@lru_cache` singleton (mirrors
+     `rag/corpus.py`'s `get_corpus()`), **not** FastAPI `lifespan`/`app.state`
+     — confirmed a bare `TestClient(app)` (the existing test fixture's
+     pattern) does not run `lifespan` startup, so anything living only on
+     `app.state` would be unset in every test. `db_session_dep` is overridden
+     in tests exactly like the existing `corpus_dep`, via an in-memory
+     `StaticPool` engine (plain `:memory:` gives each pooled connection its
+     own empty DB — confirmed by probe).
+   - API: `GET /dossiers` (list, newest first, `limit` query param),
+     `GET /dossiers/{id}` (one run, 404 if missing); `POST /dossiers` and
+     `/dossiers.md` now persist via a shared `_create_and_persist` helper.
+   - Found via a real-provider run (not just review): `evals/memo_structure_eval.py`
+     didn't pin `llm=FakeStructuredLLM()` on its `run_dossier` call, so running
+     it standalone (outside pytest, where conftest forces `fake`) silently used
+     whatever `PRAXIS_LLM_PROVIDER` `.env` set — real API calls from a
+     "deterministic, no-LLM" CI gate. Fixed: pinned explicitly.
 
 7. **Ingestion worker** — `src/praxis/worker/`
    - Dep: `arq` + `redis`. `ingest_task(payload)` wraps `ingest_source`.
@@ -260,12 +289,15 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 - [x] Researcher branches run concurrently — a test asserts observed parallelism
       ≤ `PRAXIS_RESEARCH_CONCURRENCY` and > 1  *(slice 2, `test_graph_fanout.py`)*
 - [x] Gap-fill loop still bounded; `iterations` reported correctly  *(slice 2)*
-- [ ] `POST /dossiers` → `GET /dossiers/{id}` returns the persisted run;
-      `GET /dossiers` lists it  *(slice 4)*
+- [x] `POST /dossiers` → `GET /dossiers/{id}` returns the persisted run;
+      `GET /dossiers` lists it  *(slice 4, `test_api_runs.py`)*
+- [x] a checkpointer actually writes checkpoints under the run's thread_id,
+      not just accepted silently  *(slice 4, `test_graph_checkpointing.py`)*
+- [x] CI green using SQLite  *(slice 4 — fakeredis is slice 5's worker, not this)*
 - [ ] `GET /dossiers/stream` emits ≥ 7 node events and ends with `complete`  *(slice 5)*
 - [ ] `POST /corpus/jobs` → poll → `succeeded`, `GET /corpus/stats` shows growth  *(slice 5)*
-- [ ] CI green using SQLite + fakeredis; `docker compose up` brings up
-      api + worker + redis + qdrant, all healthy  *(slices 4–5)*
+- [ ] CI green using fakeredis; `docker compose up` brings up
+      api + worker + redis + qdrant, all healthy  *(slice 5)*
 
 ### Tests to perform
 
@@ -273,9 +305,10 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 |---|---|---|
 | unit | `test_graph_fanout.py` | `dispatch_research` emits N `Send`s; `evidence` accumulates across branches; concurrency cap respected |
 | unit | `test_editor_multisection.py` | 6 `MemoSection`s; citations resolve to `evidence_refs`; recommendation logic (thin evidence → `insufficient_evidence`) |
-| unit | `test_db_models.py` | `DossierRun` / `RunEvent` round-trip on SQLite; JSON columns |
+| unit | `test_db_models.py` ✅ | `DossierRun` round-trips on SQLite incl. JSON columns; defaults; ordering. `RunEvent` deferred to slice 5 |
+| unit | `test_graph_checkpointing.py` ✅ *(slice 4, not in the original table)* | a checkpointed run's state is retrievable by `thread_id`; distinct threads don't share state; opt-in (no checkpointer → no thread_id needed) |
 | unit | `test_worker.py` | `ingest_task` grows the corpus (arq test harness + fakeredis) |
-| integration | `test_api_runs.py` | `POST /dossiers` persists; `GET /dossiers/{id}` + list |
+| integration | `test_api_runs.py` ✅ | `POST /dossiers` persists; `GET /dossiers/{id}` + list, newest-first, `limit`, unknown id → 404 |
 | integration | `test_api_sse.py` | stream yields ordered node events ending in `complete` (TestClient SSE) |
 | integration | `test_api_jobs.py` | enqueue → status transitions → corpus updated |
 | regression | existing 41 | updated for async where signatures change; still green |

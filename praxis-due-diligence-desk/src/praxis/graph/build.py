@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from praxis.config import get_settings
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
 
 
 @lru_cache
-def build_graph():
+def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     """Compile the dossier graph.
 
     planner --Send-->> research_one (fan-out, N in parallel) --(fan-in)--> {bull, bear}
@@ -48,6 +50,13 @@ def build_graph():
     sync; LangGraph runs sync nodes fine inside an async invocation. Invoke with
     ``graph.ainvoke(...)`` (see ``arun_dossier`` below) — ``.invoke()`` would fail
     on the async node functions.
+
+    ``checkpointer`` is optional (``None`` for the CLI and most tests — a plain,
+    non-resumable run). When given, the caller must also pass a ``thread_id``
+    in the run config (``arun_dossier`` handles this). ``@lru_cache`` still
+    works here: distinct checkpointer objects (identity-hashed) get distinct
+    compiled graphs, and repeated calls with the *same* checkpointer instance
+    hit the cache.
     """
     g: StateGraph = StateGraph(DossierState)
 
@@ -73,7 +82,7 @@ def build_graph():
     g.add_edge("editor", "verifier")
     g.add_edge("verifier", END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
 
 
 async def arun_dossier(
@@ -83,16 +92,27 @@ async def arun_dossier(
     corpus: Corpus | None = None,
     max_gap_loops: int | None = None,
     research_concurrency: int | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> DossierResponse:
     """Run a dossier end to end. The primary entry point — call this directly
     from async code (e.g. a FastAPI ``async def`` handler); use ``run_dossier``
-    from sync code instead."""
-    graph = build_graph()
+    from sync code instead.
+
+    Pass ``checkpointer`` to make the run resumable (each superstep is saved);
+    ``thread_id`` then identifies it in the checkpoint store, defaulting to a
+    fresh uuid4 if a checkpointer is given but no id — the API uses the
+    persisted ``DossierRun.id`` instead, so a run's checkpoint history and its
+    DB row share the same id.
+    """
+    graph = build_graph(checkpointer)
     configurable: dict = {"llm": llm or get_llm()}
     if corpus is not None:
         configurable["corpus"] = corpus
     if max_gap_loops is not None:
         configurable["max_gap_loops"] = max_gap_loops
+    if checkpointer is not None:
+        configurable["thread_id"] = thread_id or str(uuid.uuid4())
     concurrency = (
         research_concurrency
         if research_concurrency is not None
@@ -129,6 +149,8 @@ def run_dossier(
     corpus: Corpus | None = None,
     max_gap_loops: int | None = None,
     research_concurrency: int | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> DossierResponse:
     """Sync wrapper over ``arun_dossier``, for the CLI and other sync callers.
 
@@ -143,5 +165,7 @@ def run_dossier(
             corpus=corpus,
             max_gap_loops=max_gap_loops,
             research_concurrency=research_concurrency,
+            checkpointer=checkpointer,
+            thread_id=thread_id,
         )
     )

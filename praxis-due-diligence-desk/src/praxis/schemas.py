@@ -9,13 +9,15 @@ testable and the eval framework (Phase 4) straightforward.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Stance = Literal["supports", "refutes", "neutral"]
 Recommendation = Literal["proceed", "proceed_with_conditions", "pass", "insufficient_evidence"]
 Depth = Literal["quick", "standard", "deep"]
+RunStatus = Literal["running", "succeeded", "failed"]
 
 # The fixed rubric every plan must cover, so dossiers are comparable across
 # subjects and the eval harness can score section coverage.
@@ -132,3 +134,22 @@ class DossierResponse(BaseModel):
     sources: list[str] = Field(
         default_factory=list, description="Distinct corpus source ids the evidence drew on"
     )
+
+
+class DossierRunRecord(BaseModel):
+    """A persisted `DossierRun` row — `GET /dossiers` and `GET /dossiers/{id}`.
+    Validates directly off the SQLAlchemy model (`from_attributes=True`); the
+    JSON columns (`memo`, `verification`) coerce into their typed models."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    subject: str
+    depth: str
+    status: RunStatus
+    created_at: datetime
+    finished_at: datetime | None = None
+    memo: DossierMemo | None = None
+    verification: VerificationReport | None = None
+    sources: list[str] = Field(default_factory=list)
+    error: str | None = None

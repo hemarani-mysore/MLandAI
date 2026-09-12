@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     max_gap_loops: int = 1
     research_concurrency: int = 4  # cap on parallel research_one branches (Send fan-out)
 
+    # --- Persistence ---
+    database_url: str = ""  # empty -> sqlite+aiosqlite:///./praxis.db (dev/CI); Postgres in Phase 5
+    checkpoint_db_path: str = "./praxis_checkpoints.db"  # LangGraph checkpointer, own SQLite file
+
     # --- Observability ---
     otel_enabled: bool = False
 

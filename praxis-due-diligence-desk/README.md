@@ -19,7 +19,7 @@ CI, Docker/Kubernetes — in one coherent project.
 |---|---|---|
 | **0 — Scaffold** | repo layout, LangGraph skeleton (7 nodes, gap-fill loop), FastAPI + CLI, deterministic `fake` LLM, Docker, CI (lint + type + test) | ✅ **done** |
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
-| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · researcher fan-out via `Send`, bounded concurrency *(slice 2 ✅)* · async graph end to end *(slice 3 ✅)* · run persistence, SSE, ingestion worker *(slices 4–5 ⬜)* | 🟡 **in progress** |
+| **2 — Multi-agent** | real prompts, multi-section editor, `evidence_refs`, deterministic recommendation, memo-structure eval gate *(slice 1 ✅)* · researcher fan-out via `Send`, bounded concurrency *(slice 2 ✅)* · async graph end to end *(slice 3 ✅)* · run persistence + checkpointing *(slice 4 ✅)* · SSE, ingestion worker *(slice 5 ⬜)* | 🟡 **in progress** |
 | 3 — MCP | `praxis-mcp` FastMCP server (tools/resources/prompts); agents consume external MCP tools | ⬜ |
 | 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
@@ -44,6 +44,10 @@ curl -s -XPOST localhost:8000/corpus/documents -H 'content-type: application/jso
   -d '{"text":"Acme 2025 revenue was $42M.","title":"Acme 10-K"}'
 curl -s -XPOST localhost:8000/dossiers.md -H 'content-type: application/json' \
   -d '{"subject":"Acme Robotics"}'
+
+# Every dossier run is persisted — list past runs, fetch one by id
+curl -s localhost:8000/dossiers
+curl -s localhost:8000/dossiers/<id>
 ```
 
 Real models: set `PRAXIS_LLM_PROVIDER=openai|anthropic|nebius` and
@@ -82,6 +86,18 @@ stays sync.
 - **editor** — writes one section per rubric item on the cheap model tier, drops anything the red team flagged; the overall recommendation + confidence are then computed deterministically from the evidence balance (`graph/recommend.py`), not left to the model
 - **verifier** — deterministic: every citation must resolve to real gathered evidence (placeholders don't count); scores rubric coverage; flags missing / uncited sections and ungrounded memos
 
+## Persistence
+
+Every `POST /dossiers` is recorded as a `DossierRun` (async SQLAlchemy, SQLite
+by default — `PRAXIS_DATABASE_URL` empty means `./praxis.db`) from creation
+through its outcome, queryable via `GET /dossiers` (newest first) and
+`GET /dossiers/{id}`. Each run is also checkpointed — a per-call
+`AsyncSqliteSaver` (its own SQLite file, `PRAXIS_CHECKPOINT_DB_PATH`) saves
+every superstep under `thread_id = run.id`, so the run's graph state is
+technically resumable even though nothing exposes "resume" yet. Real
+migrations (Alembic) and Postgres land in Phase 5 with the rest of the deploy
+story; for now the schema is created with `Base.metadata.create_all()`.
+
 ## Retrieval
 
 ```
@@ -104,8 +120,9 @@ src/praxis/
   graph/  state.py build.py prompts.py context.py recommend.py  nodes/{planner,researcher,analysts,red_team,editor,verifier}.py
   rag/    parse.py chunk.py contextual.py embed.py bm25.py vector_store.py fuse.py rerank.py corpus.py retrieve.py ingest.py
   api/    main.py deps.py
+  db/     models.py session.py         # DossierRun, async SQLAlchemy engine/session
   obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 62 tests: graph, fan-out, async, retrieval, api, cli, schemas, recommend, verifier
+tests/                                 # 73 tests: graph, fan-out, async, checkpointing, db, api runs, retrieval, cli, schemas
 evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests

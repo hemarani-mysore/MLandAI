@@ -1,15 +1,6 @@
-import pytest
 from fastapi.testclient import TestClient
 
-from praxis.api.deps import corpus_dep
 from praxis.api.main import app
-
-
-@pytest.fixture
-def client(corpus):
-    app.dependency_overrides[corpus_dep] = lambda: corpus
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 def test_health():
