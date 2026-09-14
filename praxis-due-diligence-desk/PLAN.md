@@ -24,7 +24,7 @@ manifests validated on an ephemeral `kind` cluster in CI.
 | # | Requirement | In Praxis | Pattern adapted from `awesome-ai-apps` |
 |---|---|---|---|
 | 1 | LLM prompting, embedding, RAG | Ingestion → chunk + contextual augmentation → Qdrant hybrid (dense `Qwen3-Embedding-8B` / `text-embedding-3-large` + BM25) → RRF fusion → cross-encoder rerank → page-level citations. Every agent boundary is a Pydantic structured output. | `advanced_rag_with_reranking/src/boeing_rag/*`, `mcp_toolbox_security_agent/agent/embeddings.py`, `maintainer_brief/backend/app/intelligence/llm.py` |
-| 2 | MCP server with tools | `praxis-mcp` (FastMCP) exposes `create_dossier`, `search_corpus`, `ingest_document`, `get_evidence` + resources (`dossier://{id}`, `corpus://stats`) + prompts. The **researcher node also consumes** an external web-search MCP (Exa) and a GitHub MCP. | `deep_research_writing_agents_nebius_okahu/src/research/server.py` + `routers/*`, `deep_researcher_agent/server.py` |
+| 2 | MCP server with tools | `praxis-mcp` (FastMCP) exposes `create_dossier`, `search_corpus`, `ingest_document`, `get_evidence` + resources (`dossier://{id}`, `corpus://stats`) + prompts. The **researcher node also consumes** an external web-search MCP tool (tested against a stub — no real Exa key on this machine; GitHub MCP was scoped out, see Phase 3). | `deep_research_writing_agents_nebius_okahu/src/research/server.py` + `routers/*`, `deep_researcher_agent/server.py` |
 | 3 | Docker, k8s, CI/CD | Multi-stage non-root Dockerfiles per service; `docker-compose` (dev + self-host); `deploy/k8s` base + kustomize overlays (Deployments, HPA, PDB, NetworkPolicy, Ingress, secrets); GitHub Actions: lint → type → test → **eval-gate** → build→GHCR → `kind` smoke → deploy. | `mcp_toolbox_security_agent/deploy/{k8s,compose}/*`, `maintainer_brief/backend/{Dockerfile,fly.toml}` + `PRODUCTION.md` |
 | 4 | Multi-agent | LangGraph graph with parallel branches (bull ∥ bear), a bounded evaluator-optimizer gap-fill loop (red_team → researcher), and a deterministic final gate (verifier). | `agentfield_finance_research_agent/src/reasoners.py`, `deep_researcher_agent/agents.py`, `due_diligence_agent/agents.py` |
 | 5 | Eval framework | Golden-dossier dataset with splits; LLM-as-judge (`BinaryLLMJudgeMetric` → pass/fail + critique → **F1 vs expert labels**); RAGAS for retrieval; deterministic citation-integrity; seeded-error detection for the red team; offline + online eval; `make eval-*`; CI regression gate. | `deep_research_writing_agents_nebius_okahu/src/writing/evals/*` + `scripts/run_*evaluation.py`, `advanced_rag_with_reranking/evals/*` |
@@ -181,13 +181,16 @@ timing out — the endpoint degraded correctly (persisted `failed`, emitted an
 `error` frame, no server-wide impact); tuning that timeout is future hardening,
 not attempted here.
 
-### Phase 3 — MCP (~3 days)
+### Phase 3 — MCP (~3 days) — done, see `docs/IMPLEMENTATION_PLAN.md`
 - `src/praxis/mcp/server.py` (FastMCP): tools `create_dossier`, `search_corpus`,
   `ingest_document`, `get_evidence`; resources `dossier://{id}`,
-  `dossier://{id}/citations`, `corpus://stats`; prompt `due-diligence-brief`.
-- Researcher consumes an external **web-search MCP** (Exa) + **GitHub MCP**
-  (`langchain-mcp-adapters`).
-- `.mcp.json` so it drops into Claude Code / Cursor. MCP contract test in CI.
+  `dossier://{id}/citations`, `corpus://stats`; prompts `due-diligence-brief`,
+  `investment-memo`.
+- Researcher consumes an external **web-search MCP** via
+  `langchain-mcp-adapters` (`PRAXIS_MCP_SERVERS`) — tested against a stub
+  server, no real Exa/GitHub key on this machine, so **GitHub MCP is out of
+  scope** here (see the phase's own scope-cuts note).
+- `.mcp.json` so it drops into Claude Code / Cursor. `mcp-contract` CI job.
 
 ### Phase 4 — Eval framework (~1 week) — the portfolio centrepiece
 - `evals/datasets/golden_dossiers/` — 8–15 subjects, each with frozen `sources/`,

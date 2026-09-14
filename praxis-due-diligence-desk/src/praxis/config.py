@@ -16,6 +16,7 @@ load_dotenv()
 Provider = Literal["fake", "openai", "anthropic", "nebius"]
 EmbeddingProvider = Literal["fake", "openai", "nebius"]
 Reranker = Literal["lexical", "cross-encoder", "none"]
+MCPTransport = Literal["stdio", "sse", "streamable-http"]
 
 NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
 
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     strong_model: str = "openai:gpt-4o"  # planner + bull/bear analysts
     fast_model: str = "openai:gpt-4o-mini"  # editor + red_team
     # Roles that run on the cheaper/faster tier (calibration + synthesis work).
-    fast_roles: tuple[str, ...] = ("editor", "red_team")
+    fast_roles: tuple[str, ...] = ("editor", "red_team", "evidence_lookup")
     nebius_base_url: str = NEBIUS_BASE_URL
 
     # --- Retrieval / RAG ---
@@ -65,6 +66,20 @@ class Settings(BaseSettings):
 
     # --- Ingestion worker ---
     redis_url: str = "redis://localhost:6379"  # the arq job queue
+
+    # --- MCP ---
+    # JSON map of external MCP servers the researcher may fall back to when the
+    # corpus has nothing, e.g. {"exa": {"transport": "stdio", "command": "...", "args": [...]}}.
+    # Empty -> unchanged corpus-only behaviour (no external calls, ever).
+    mcp_servers: str = ""
+    # How `praxis-mcp` (this project's own server, src/praxis/mcp/) exposes
+    # itself: "stdio" for a host that spawns it as a subprocess (Claude Code,
+    # Cursor, the test suite); "streamable-http" for a standalone networked
+    # service (the `mcp` Docker Compose service). host/port only matter for
+    # the latter two.
+    mcp_transport: MCPTransport = "stdio"
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8000
 
     # --- Observability ---
     otel_enabled: bool = False

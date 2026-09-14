@@ -24,6 +24,8 @@ dependencies = [
     "aiosqlite>=0.20",
     "langgraph-checkpoint-sqlite>=2",
     "arq>=0.26",
+    "mcp>=1.2",
+    "langchain-mcp-adapters>=0.1",
 ]
 
 [project.optional-dependencies]

@@ -25,6 +25,7 @@ from praxis.schemas import (
     Citation,
     DossierMemo,
     Evidence,
+    EvidenceIndices,
     Finding,
     MemoSection,
     RedTeamReport,
@@ -195,6 +196,10 @@ def _canned(schema: type[BaseModel], *, system: str, user: str) -> BaseModel:
         )
     if schema is RedTeamReport:
         return RedTeamReport()
+    if schema is EvidenceIndices:
+        # deterministic stand-in: if any context was retrieved ("[0] ..."
+        # appears), call the first chunk supporting; otherwise nothing to cite.
+        return EvidenceIndices(supporting_indices=[0] if "[0]" in user else [])
     if schema is DossierMemo:
         return DossierMemo(
             subject=subject,

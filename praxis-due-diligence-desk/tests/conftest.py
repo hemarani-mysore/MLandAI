@@ -1,5 +1,8 @@
 import os
+import sys
 import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 os.environ.setdefault("PRAXIS_LLM_PROVIDER", "fake")
 os.environ.setdefault("PRAXIS_EMBEDDING_PROVIDER", "fake")
@@ -10,6 +13,8 @@ import pytest_asyncio  # noqa: E402
 from arq.connections import ArqRedis  # noqa: E402
 from fakeredis.aioredis import FakeRedis, FakeServer  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from mcp import ClientSession  # noqa: E402
+from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -21,6 +26,8 @@ from praxis.rag.corpus import Corpus  # noqa: E402
 from praxis.rag.embed import HashEmbedder  # noqa: E402
 from praxis.rag.rerank import LexicalReranker  # noqa: E402
 from praxis.rag.vector_store import QdrantVectorStore  # noqa: E402
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def make_corpus(dim: int = 64) -> Corpus:
@@ -97,3 +104,23 @@ def client(corpus, db_session, redis_pool):
     app.dependency_overrides[redis_dep] = _redis_override
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@asynccontextmanager
+async def mcp_client():
+    """An async context manager (not a fixture — an `async with A, B:` fixture
+    spanning a `yield` hits an anyio "cancel scope in a different task" error
+    under pytest-asyncio's function-scoped runner, since fixture teardown can
+    run in a different task than setup/the test body) yielding a `ClientSession`
+    connected to a real `python -m praxis.mcp` subprocess — the same way a real
+    MCP host (Claude Code, Cursor, ...) would connect — forced onto the
+    fake/offline provider regardless of the parent's `.env`."""
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "praxis.mcp"],
+        env={**os.environ, "PRAXIS_LLM_PROVIDER": "fake", "PRAXIS_EMBEDDING_PROVIDER": "fake"},
+        cwd=str(PROJECT_ROOT),
+    )
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        yield session

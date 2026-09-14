@@ -11,6 +11,13 @@
 # gotcha as running `praxis ingest` then `praxis search` as two separate CLI
 # invocations).
 #
+# Phase 3 adds: `mcp`, the same image as api/worker (all three share one
+# Dockerfile — `mcp`/`langchain-mcp-adapters` are core deps already) running
+# `praxis.mcp` over streamable-http instead of stdio, so it's reachable as a
+# normal network service rather than a spawned subprocess.
+#   curl -s -XPOST localhost:8001/mcp -H 'content-type: application/json' \
+#     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+#
 # Phase 5 adds: Postgres (replaces SQLite for PRAXIS_DATABASE_URL) + Alembic
 # migrations, per-service Dockerfiles, k8s manifests.
 services:
@@ -55,6 +62,27 @@ services:
         condition: service_started
     deploy:
       replicas: 1  # the ingestion queue isn't sharded yet — one replica only
+
+  mcp:
+    build: .
+    command: ["praxis", "mcp"]
+    ports:
+      - "8001:8001"
+    environment:
+      PRAXIS_LLM_PROVIDER: ${PRAXIS_LLM_PROVIDER:-fake}
+      PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
+      PRAXIS_QDRANT_URL: http://qdrant:6333
+      PRAXIS_MCP_TRANSPORT: streamable-http
+      PRAXIS_MCP_HOST: 0.0.0.0
+      PRAXIS_MCP_PORT: "8001"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_started
+    # Own in-memory corpus/DB unless PRAXIS_QDRANT_URL/PRAXIS_DATABASE_URL
+    # point at the same real backends api/worker use — same caveat as the CLI.
 
   redis:
     image: redis:7-alpine

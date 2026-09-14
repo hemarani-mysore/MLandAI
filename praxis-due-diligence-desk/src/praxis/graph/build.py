@@ -26,8 +26,11 @@ from praxis.graph.nodes import (
 from praxis.graph.state import DossierState, initial_state
 from praxis.llm import StructuredLLM, get_llm
 from praxis.schemas import PLACEHOLDER_SOURCE_IDS, DossierRequest, DossierResponse
+from praxis.tools import load_external_tools
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
     from praxis.rag import Corpus
 
 # The real graph nodes — used by api/sse.py to isolate genuine node execution
@@ -127,6 +130,7 @@ async def arun_dossier(
     research_concurrency: int | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    external_tools: dict[str, BaseTool] | None = None,
 ) -> DossierResponse:
     """Run a dossier end to end. The primary entry point — call this directly
     from async code (e.g. a FastAPI ``async def`` handler); use ``run_dossier``
@@ -137,9 +141,16 @@ async def arun_dossier(
     fresh uuid4 if a checkpointer is given but no id — the API uses the
     persisted ``DossierRun.id`` instead, so a run's checkpoint history and its
     DB row share the same id.
+
+    ``external_tools`` (by name, e.g. ``{"web_search": ...}``) lets
+    ``research_one`` fall back off the corpus — pass an explicit map (tests use
+    this with a stub) or leave it unset to load whatever ``PRAXIS_MCP_SERVERS``
+    configures (nothing, by default — unchanged corpus-only behaviour).
     """
     graph = build_graph(checkpointer)
-    configurable: dict = {"llm": llm or get_llm()}
+    if external_tools is None:
+        external_tools = await load_external_tools()
+    configurable: dict = {"llm": llm or get_llm(), "external_tools": external_tools}
     if corpus is not None:
         configurable["corpus"] = corpus
     if max_gap_loops is not None:
@@ -168,6 +179,7 @@ def run_dossier(
     research_concurrency: int | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    external_tools: dict[str, BaseTool] | None = None,
 ) -> DossierResponse:
     """Sync wrapper over ``arun_dossier``, for the CLI and other sync callers.
 
@@ -184,5 +196,6 @@ def run_dossier(
             research_concurrency=research_concurrency,
             checkpointer=checkpointer,
             thread_id=thread_id,
+            external_tools=external_tools,
         )
     )

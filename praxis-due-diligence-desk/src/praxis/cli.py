@@ -42,6 +42,15 @@ def _cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    # Imported lazily — the `mcp` package (and its stdio transport) is only
+    # needed for this one subcommand, not for every `praxis` invocation.
+    from praxis.mcp import main as mcp_main
+
+    mcp_main()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="praxis", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -66,6 +75,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     search.add_argument("query")
     search.add_argument("-k", type=int, default=6)
     search.set_defaults(func=_cmd_search)
+
+    mcp = sub.add_parser("mcp", help="Run the praxis-mcp server over stdio")
+    mcp.set_defaults(func=_cmd_mcp)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

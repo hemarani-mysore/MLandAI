@@ -371,60 +371,83 @@ editor, run persistence + checkpointing, SSE streaming, ingestion worker.
 
 ---
 
-## Phase 3 — MCP  ·  ⬜  (~3 days)
+## Phase 3 — MCP  ·  ✅ done
 
 **Goal:** ship `praxis-mcp` (the desk as MCP tools/resources/prompts) and let the
 researcher consume *external* MCP tools (web search, GitHub).
 
-### Steps
+### What shipped
+- `src/praxis/mcp/server.py` — one `FastMCP("praxis")` instance calling existing
+  library code (no logic fork): tools `create_dossier`, `search_corpus`,
+  `ingest_document`, `get_evidence` (retrieves top-k chunks, asks the LLM which
+  *indices* support/refute a claim, then maps indices back to real `Citation`s
+  — the model never invents citation fields); resources `dossier://{id}`,
+  `dossier://{id}/citations`, `corpus://stats`; prompts `due-diligence-brief`,
+  `investment-memo`. Transport, host, and port are settings-driven
+  (`PRAXIS_MCP_TRANSPORT`/`_HOST`/`_PORT`) — stdio by default (any host spawns
+  it as a subprocess), `streamable-http` for the Docker Compose service.
+- `src/praxis/tools/mcp_tools.py` — `load_external_tools()`: `PRAXIS_MCP_SERVERS`
+  (JSON, empty by default) → `MultiServerMCPClient` → `dict[name, BaseTool]`.
+  `research_one` falls back to a `web_search`-shaped tool (if configured) when
+  the corpus has nothing for a question, before the existing `no-source`
+  placeholder; unset stays byte-identical to Phase 2.
+- `.mcp.json` at the project root; `praxis mcp` CLI subcommand.
+- `mcp` service in `docker-compose.yml`, reusing the existing root `Dockerfile`
+  (it already ships `mcp`/`langchain-mcp-adapters` as core deps) with
+  `command: ["praxis", "mcp"]` and `PRAXIS_MCP_TRANSPORT=streamable-http` —
+  the same one-Dockerfile-three-commands pattern `api`/`worker` already use,
+  not a separate `docker/mcp.Dockerfile`.
+- `.github/workflows/ci.yml` — this file didn't actually exist before Phase 3
+  despite Phase 0/1 above marking a `quality`/`eval-gate` workflow as shipped;
+  building it now closes that gap as well as adding this phase's own
+  `mcp-contract` job (`quality` × {3.11, 3.12}, `eval-gate`, `mcp-contract`).
 
-1. **Deps** — `mcp` (FastMCP), `langchain-mcp-adapters`. `exa-py` optional.
-
-2. **`src/praxis/mcp/server.py`** — a FastMCP server calling `praxis` library code
-   (no logic fork):
-   - **tools**: `create_dossier(subject, depth="standard")`,
-     `search_corpus(query, k=6)`, `ingest_document(text|url, title)`,
-     `get_evidence(claim)` → `{supporting: [...], refuting: [...]}`
-   - **resources**: `dossier://{id}`, `dossier://{id}/citations`, `corpus://stats`
-   - **prompts**: `due-diligence-brief`, `investment-memo`
-   - transports: stdio (`python -m praxis.mcp`) and streamable-HTTP (for deploy)
-
-3. **`.mcp.json`** at project root — Claude Code / Cursor config pointing at
-   `uv run python -m praxis.mcp`.
-
-4. **`praxis mcp`** CLI subcommand → runs the stdio server.
-
-5. **External MCP consumption** — `src/praxis/tools/mcp_tools.py`
-   - `PRAXIS_MCP_SERVERS` (JSON): e.g. `{"exa": {...}, "github": {...}}`.
-   - Load via `MultiServerMCPClient` → LangChain tools.
-   - `research_one`: after corpus retrieval, if hits are empty/weak **and**
-     `web_search` is available, call it; merge results as `Evidence` with URL
-     citations (`locator` = the URL).
-   - No `PRAXIS_MCP_SERVERS` → unchanged corpus-only behaviour.
-
-6. **Deploy artefact** — `docker/mcp.Dockerfile`; `mcp` service in compose.
+### Scope cuts (and why)
+- **No GitHub MCP consumption.** Only the plan's concretely-specified
+  `web_search` fallback is built; "GitHub" appeared once in `PLAN.md`'s prose
+  with no further spec, so it's out of scope here, not silently dropped.
+- **External MCP consumption tested against a stub server only**
+  (`tests/fixtures/stub_web_search_server.py`) — no real Exa/GitHub key exists
+  on this machine. `exa-py` was not added as a dependency for the same reason.
+- **`docker compose up` for the new `mcp` service is reviewed, not run** — no
+  Docker on this machine, the same limitation as every earlier deploy-touching
+  slice. The `streamable-http` transport itself *was* verified directly
+  (started locally on a scratch port, probed with a real MCP `initialize`
+  call over HTTP) — only the Compose wiring around it is untested.
+- **API drift, checked rather than assumed:** an isolated dependency probe of
+  `mcp>=1.2` in a scratch environment resolved to `mcp==2.2.0`, which renames
+  `FastMCP` to `MCPServer` — this looked like a breaking change to plan around.
+  Installing into the *actual* project (`uv sync --extra dev`) resolves
+  `mcp==1.30.0` instead (constrained by `langchain-mcp-adapters`), which still
+  has `FastMCP` — confirmed directly against the project's own venv before
+  writing any server code. The server uses `FastMCP`, not `MCPServer`.
 
 ### Acceptance criteria
-
-- [ ] `python -m praxis.mcp` starts; a contract test enumerates **4 tools, 3
+- [x] `python -m praxis.mcp` starts; a contract test enumerates **4 tools, 3
       resources, 2 prompts** with correct schemas
-- [ ] `create_dossier` over MCP ≡ `run_dossier` for the same input (parity test)
-- [ ] `.mcp.json` loads in Claude Code; `search_corpus` returns hits (manual)
-- [ ] `PRAXIS_MCP_SERVERS` unset → dossier output byte-identical to Phase 2
-- [ ] With a stub MCP server configured, `research_one` calls its `web_search`
+- [x] `create_dossier` over MCP ≡ `run_dossier` for the same input (parity
+      test, fake provider; re-verified manually with a real GPT-4o run through
+      the MCP tool — correct 6-section memo, and the verifier correctly
+      flagged the empty-corpus/no-external-tools run as ungrounded)
+- [x] `.mcp.json` present at the project root, pointing at
+      `uv run python -m praxis.mcp` — loading it in an actual Claude Code
+      session and asking it to create a dossier is a manual step for the user,
+      not something this environment can drive itself
+- [x] `PRAXIS_MCP_SERVERS` unset → dossier output unchanged from Phase 2
+      (`test_researcher_web_fallback.py::test_unconfigured_stays_on_the_no_source_path`)
+- [x] With a stub MCP server configured, `research_one` calls its `web_search`
       and produces an `Evidence` with a URL citation
-- [ ] `mcp` image builds; `docker compose up` exposes it
+- [x] `mcp` service added to `docker-compose.yml`, same image as `api`/`worker`
+      (build reviewed for correctness, not executed — see scope cuts)
 
-### Tests to perform
-
-| Kind | File | Checks |
-|---|---|---|
-| unit | `test_mcp_server.py` | in-process client lists + calls every tool/resource/prompt; schema assertions |
-| unit | `test_mcp_tools_loader.py` | mocked `MultiServerMCPClient` → tools wired into researcher |
-| contract | `test_mcp_parity.py` | `create_dossier` MCP result == `run_dossier` result |
-| integration | `test_researcher_web_fallback.py` | tiny fake FastMCP with canned `web_search`; researcher uses it when corpus empty; URL citation present |
-| CI | new `mcp-contract` job | runs the MCP unit + contract tests (offline, fake LLM) |
-| manual | Claude Code | add `praxis-mcp`, ask "create a dossier on Acme Robotics", confirm round-trip + citations |
+### Tests in place
+`tests/test_mcp_server.py` (7 — real stdio subprocess round trip: tool/resource/
+prompt listing, `ingest_document`→`search_corpus`→`get_evidence`, empty-corpus
+`get_evidence`, `create_dossier`, `corpus://stats`, unknown-resource error,
+prompt rendering) · `tests/test_mcp_parity.py` (1) · `tests/test_mcp_tools_loader.py`
+(2 — unset → `{}`; configured against the stub → a real, invocable `web_search`
+tool) · `tests/test_researcher_web_fallback.py` (2) · `tests/test_cli.py`
+(+1 — `praxis mcp` dispatches to the server entrypoint)
 
 ---
 

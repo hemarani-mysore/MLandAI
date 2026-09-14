@@ -181,3 +181,21 @@ class JobStatusOut(BaseModel):
     success: bool | None = None
     result: dict | None = None
     error: str | None = None
+
+
+class EvidenceIndices(BaseModel):
+    """LLM output for the `get_evidence` MCP tool: which retrieved-chunk
+    *indices* support or refute the claim — never citation fields directly, so
+    the model can't invent a source. The tool maps indices back to real
+    `Citation`s itself (same grounding pattern as `researcher._ground`)."""
+
+    supporting_indices: list[int] = Field(default_factory=list)
+    refuting_indices: list[int] = Field(default_factory=list)
+
+
+class EvidenceLookup(BaseModel):
+    """`get_evidence(claim)` MCP tool response."""
+
+    claim: str
+    supporting: list[Citation] = Field(default_factory=list)
+    refuting: list[Citation] = Field(default_factory=list)

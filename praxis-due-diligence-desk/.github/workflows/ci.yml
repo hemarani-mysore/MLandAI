@@ -1,0 +1,65 @@
+name: CI
+
+# Per-PR / per-push gate — fast, deterministic, fully offline (PRAXIS_LLM_PROVIDER
+# and PRAXIS_EMBEDDING_PROVIDER default to "fake" with no .env on a fresh
+# checkout, so no secrets are needed here). Docs (`docs/IMPLEMENTATION_PLAN.md`)
+# had marked this job as shipped back in Phase 0/1, but the workflow file was
+# never actually committed until Phase 3 — this file closes that gap as well
+# as adding Phase 3's own `mcp-contract` job.
+#
+# Nightly (real cheap model, full eval suite) is Phase 4+ scope — not here.
+
+on:
+  push:
+    branches: [main, praxis-due-diligence-desk]
+  pull_request:
+
+jobs:
+  quality:
+    name: quality (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv python install ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest
+
+  eval-gate:
+    name: eval-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - run: uv run python evals/rag_eval.py --gate
+      - run: uv run python evals/memo_structure_eval.py --gate
+
+  mcp-contract:
+    name: mcp-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - run: >
+          uv run pytest
+          tests/test_mcp_server.py
+          tests/test_mcp_parity.py
+          tests/test_mcp_tools_loader.py
+          tests/test_researcher_web_fallback.py
+          -v

@@ -26,3 +26,14 @@ def test_cli_ingest_then_search(tmp_path, capsys):
 def test_cli_search_empty_corpus(capsys):
     assert main(["search", "anything"]) == 0
     assert "no results" in capsys.readouterr().out
+
+
+def test_cli_mcp_dispatches_to_the_server_entrypoint(monkeypatch):
+    # `praxis mcp` blocks on stdio for real hosts — here we only check it
+    # dispatches to `praxis.mcp.main`, not run the server itself.
+    calls = []
+    monkeypatch.setattr("praxis.mcp.main", lambda: calls.append(1))
+
+    assert main(["mcp"]) == 0
+
+    assert calls == [1]

@@ -12,6 +12,8 @@ from praxis.llm import StructuredLLM, get_llm
 from praxis.schemas import RUBRIC_SECTIONS
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
     from praxis.rag import Corpus
 
 
@@ -31,6 +33,13 @@ def corpus_from(config: RunnableConfig) -> Corpus | None:
 
 def max_gap_loops(config: RunnableConfig) -> int:
     return int(_configurable(config).get("max_gap_loops", get_settings().max_gap_loops))
+
+
+def external_tools_from(config: RunnableConfig) -> dict[str, BaseTool]:
+    """External MCP tools loaded for this run (``praxis.tools.load_external_tools``),
+    keyed by name — empty when ``PRAXIS_MCP_SERVERS`` is unset, which is the
+    default and keeps ``research_one`` corpus-only."""
+    return _configurable(config).get("external_tools") or {}
 
 
 def _evidence_line(i: int, ev) -> str:

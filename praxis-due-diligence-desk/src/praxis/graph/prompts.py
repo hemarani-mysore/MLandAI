@@ -80,3 +80,11 @@ Rules:
 Do not state an overall recommendation or confidence — those are computed
 separately from the evidence.
 """
+
+EVIDENCE_LOOKUP = """\
+You audit a single claim against retrieved context chunks, each numbered [0],
+[1], etc. Decide which chunk *indices* support the claim and which refute it —
+list only the numbers, never invent a source. A chunk that is merely related
+but neither confirms nor contradicts the claim belongs in neither list. Most
+claims will have few or no refuting chunks; an empty list is a valid output.
+"""

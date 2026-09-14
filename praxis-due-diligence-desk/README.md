@@ -20,7 +20,7 @@ CI, Docker/Kubernetes — in one coherent project.
 | **0 — Scaffold** | repo layout, LangGraph skeleton (7 nodes, gap-fill loop), FastAPI + CLI, deterministic `fake` LLM, Docker, CI (lint + type + test) | ✅ **done** |
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
 | **2 — Multi-agent** | real prompts + multi-section editor + deterministic recommendation; researcher fan-out via `Send`; async graph end to end; run persistence + checkpointing; SSE streaming + ingestion worker | ✅ **done** |
-| 3 — MCP | `praxis-mcp` FastMCP server (tools/resources/prompts); agents consume external MCP tools | ⬜ |
+| **3 — MCP** | `praxis-mcp` FastMCP server (4 tools, 3 resources, 2 prompts); researcher falls back to an external `web_search` MCP tool when the corpus has nothing; CI (`quality` × 2 Python versions, `eval-gate`, `mcp-contract`) | ✅ **done** |
 | 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
 
@@ -132,6 +132,34 @@ Everything runs offline by default: `HashEmbedder` (deterministic), a pure-Pytho
 `BM25Index`, and Qdrant in `:memory:` mode. Swap in real models via env; the code
 paths don't change.
 
+## MCP
+
+`praxis-mcp` exposes the desk to any MCP host (Claude Code, Cursor, ...) — it
+calls the same library code as the API and CLI, no logic fork:
+
+- **tools** — `create_dossier(subject, depth)`, `search_corpus(query, k)`,
+  `ingest_document(text|path, title)`, `get_evidence(claim, k)` (which
+  retrieved chunks support/refute a claim)
+- **resources** — `dossier://{id}`, `dossier://{id}/citations`, `corpus://stats`
+- **prompts** — `due-diligence-brief`, `investment-memo`
+
+```bash
+uv run praxis mcp              # stdio, for a host to spawn as a subprocess
+```
+
+`.mcp.json` at the project root points Claude Code / Cursor at
+`uv run python -m praxis.mcp` — open this directory in either and the tools
+above are available immediately. `PRAXIS_MCP_TRANSPORT=streamable-http` (with
+`PRAXIS_MCP_HOST`/`PRAXIS_MCP_PORT`) runs it as a standalone networked service
+instead — what the `mcp` Docker Compose service uses.
+
+The researcher can also reach *outward*: `PRAXIS_MCP_SERVERS` (JSON, empty by
+default) configures external MCP servers via `MultiServerMCPClient`; when a
+question's corpus retrieval comes back empty and a `web_search`-shaped tool is
+configured, `research_one` calls it and cites the result by URL instead of the
+`no-source` placeholder. Unset (the default) — corpus-only, unchanged from
+Phase 2.
+
 ## Layout
 
 ```
@@ -142,11 +170,15 @@ src/praxis/
   api/    main.py deps.py sse.py
   db/     models.py session.py         # DossierRun, RunEvent, async SQLAlchemy engine/session
   worker/ __init__.py                  # arq ingest_task + WorkerSettings
+  mcp/    server.py __main__.py         # praxis-mcp — tools/resources/prompts over the same library code
+  tools/  mcp_tools.py                  # load_external_tools() — the researcher's web-search fallback
   obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 82 tests: graph, fan-out, async, checkpointing, db, api runs, sse, jobs, worker, retrieval, cli, schemas
+tests/                                 # 95 tests: graph, fan-out, async, checkpointing, db, api runs, sse, jobs, worker, retrieval, cli, schemas, mcp server + parity + external-tools loader + web fallback
 evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
+.github/workflows/ci.yml               # quality (3.11/3.12) + eval-gate + mcp-contract
+.mcp.json                              # Claude Code / Cursor config for praxis-mcp
 ```
 
 ## Provenance
