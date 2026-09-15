@@ -19,6 +19,7 @@ from praxis.db.session import get_sessionmaker
 from praxis.graph import arun_dossier
 from praxis.graph.prompts import EVIDENCE_LOOKUP
 from praxis.llm import get_llm
+from praxis.obs import setup_tracing
 from praxis.rag import RetrievedChunk, get_corpus, ingest_source, search_corpus
 from praxis.rag.models import CorpusStats, IngestResult
 from praxis.schemas import (
@@ -31,6 +32,7 @@ from praxis.schemas import (
 )
 
 _settings = get_settings()
+setup_tracing()
 # host/port only matter for the networked transports (sse, streamable-http) —
 # a stdio host (Claude Code, Cursor, the test suite) ignores them entirely.
 mcp = FastMCP("praxis", host=_settings.mcp_host, port=_settings.mcp_port)

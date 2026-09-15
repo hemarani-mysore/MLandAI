@@ -17,6 +17,7 @@ import re
 from collections import defaultdict
 from typing import Any, Literal, TypeVar
 
+from opentelemetry import trace
 from pydantic import BaseModel, SecretStr
 
 from praxis.config import Settings, get_settings
@@ -35,6 +36,24 @@ from praxis.schemas import (
 
 T = TypeVar("T", bound=BaseModel)
 
+# USD per 1M (input, output) tokens. A small static table covering only the
+# two models this project actually defaults to and has been verified against
+# throughout (config.py's strong_model/fast_model) — OpenAI's own published
+# pricing, stable since GPT-4o's release. Any other model (Anthropic, Nebius,
+# a different OpenAI model) reports cost as 0.0 rather than a guessed number:
+# a visibly-zero, honestly-"not priced yet" figure beats a silently-wrong one.
+PRICING_USD_PER_1M: dict[str, tuple[float, float]] = {
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+}
+
+
+def _price_for(model_name: str) -> tuple[float, float]:
+    # config.py's model strings are "provider:model" (e.g. "openai:gpt-4o");
+    # strip any such prefix before the table lookup.
+    bare = model_name.rsplit(":", 1)[-1]
+    return PRICING_USD_PER_1M.get(bare, (0.0, 0.0))
+
 
 class StructuredLLM:
     """Interface: given a prompt + schema + role, return a schema instance.
@@ -43,7 +62,24 @@ class StructuredLLM:
     call ``agenerate``/``acomplete`` (so concurrent branches genuinely overlap
     on the event loop instead of only in a thread pool); ``generate``/``complete``
     remain for direct/script use (e.g. ``evals/rag_eval_ragas.py``).
+
+    ``total_prompt_tokens``/``total_completion_tokens``/``total_cost_usd``
+    accumulate across every ``generate``/``agenerate`` call this instance
+    makes — one instance is built per run (``arun_dossier``/``run_dossier``
+    call ``get_llm()`` once and thread it through the whole graph via
+    ``config["configurable"]["llm"]``), so these are a real per-run total, not
+    a process-wide one. Safe under concurrent ``Send`` branches: the
+    increment happens synchronously right after an ``await`` returns, with no
+    further ``await`` before it, so no other coroutine can interleave the
+    read-modify-write. ``FakeStructuredLLM`` never touches these — they stay
+    at 0, which is correct: a fake-provider run has no real cost.
+    ``complete``/``acomplete`` (plain-string completions, used outside the
+    graph's structured-output nodes) are out of scope for this accounting.
     """
+
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_cost_usd: float = 0.0
 
     def generate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
         raise NotImplementedError
@@ -81,25 +117,60 @@ class LangChainStructuredLLM(StructuredLLM):
     def __init__(self, settings: Settings) -> None:
         self._fast_roles = set(settings.fast_roles)
         self._models = _build_models(settings)
+        self._model_names = {"strong": settings.strong_model, "fast": settings.fast_model}
+
+    def _tier(self, role: str) -> str:
+        return "fast" if role in self._fast_roles else "strong"
 
     def _model(self, role: str) -> Any:
-        return self._models["fast" if role in self._fast_roles else "strong"]
+        return self._models[self._tier(role)]
+
+    def _record_usage(self, tier: str, raw: Any) -> None:
+        """Pull token counts off the raw ``AIMessage`` (``with_structured_
+        output(..., include_raw=True)``'s ``usage_metadata``), accumulate
+        onto this instance's running totals, and set them — plus the model
+        name and per-call cost — as attributes on the *current* OTel span
+        (the node's own ``span(...)``, from ``obs/__init__.py``). Setting
+        attributes on a non-recording span (tracing disabled) is a no-op by
+        design of the OTel API, so this needs no enabled-check of its own."""
+        usage = getattr(raw, "usage_metadata", None) or {}
+        prompt_tokens = usage.get("input_tokens", 0)
+        completion_tokens = usage.get("output_tokens", 0)
+        model_name = self._model_names[tier]
+        price_in, price_out = _price_for(model_name)
+        cost = (prompt_tokens * price_in + completion_tokens * price_out) / 1_000_000
+
+        self.total_prompt_tokens += prompt_tokens
+        self.total_completion_tokens += completion_tokens
+        self.total_cost_usd += cost
+
+        span = trace.get_current_span()
+        span.set_attribute("model", model_name)
+        span.set_attribute("prompt_tokens", prompt_tokens)
+        span.set_attribute("completion_tokens", completion_tokens)
+        span.set_attribute("cost_usd", cost)
 
     def generate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
-        model = self._model(role).with_structured_output(schema)
+        tier = self._tier(role)
+        model = self._models[tier].with_structured_output(schema, include_raw=True)
         result = model.invoke([("system", system), ("human", user)])
-        assert isinstance(result, schema)
-        return result
+        self._record_usage(tier, result["raw"])
+        parsed = result["parsed"]
+        assert isinstance(parsed, schema)
+        return parsed
 
     def complete(self, *, system: str, user: str, role: str = "util") -> str:
         result = self._models["fast"].invoke([("system", system), ("human", user)])
         return str(getattr(result, "content", result))
 
     async def agenerate(self, *, system: str, user: str, schema: type[T], role: str) -> T:
-        model = self._model(role).with_structured_output(schema)
+        tier = self._tier(role)
+        model = self._models[tier].with_structured_output(schema, include_raw=True)
         result = await model.ainvoke([("system", system), ("human", user)])
-        assert isinstance(result, schema)
-        return result
+        self._record_usage(tier, result["raw"])
+        parsed = result["parsed"]
+        assert isinstance(parsed, schema)
+        return parsed
 
     async def acomplete(self, *, system: str, user: str, role: str = "util") -> str:
         result = await self._models["fast"].ainvoke([("system", system), ("human", user)])

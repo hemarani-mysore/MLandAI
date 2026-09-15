@@ -29,6 +29,7 @@ from praxis.config import get_settings
 from praxis.db import DossierRun, RunEvent
 from praxis.graph import arun_dossier
 from praxis.graph.checkpoint import open_checkpointer
+from praxis.obs import setup_tracing
 from praxis.rag import Corpus, RetrievedChunk, ingest_source
 from praxis.rag.models import CorpusStats, IngestResult
 from praxis.render import to_markdown
@@ -41,6 +42,8 @@ from praxis.schemas import (
     JobStatusOut,
     RunEventOut,
 )
+
+setup_tracing()
 
 app = FastAPI(title="Praxis — Due-Diligence Research Desk", version=__version__)
 

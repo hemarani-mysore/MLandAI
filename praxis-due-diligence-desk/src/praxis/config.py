@@ -83,6 +83,11 @@ class Settings(BaseSettings):
 
     # --- Observability ---
     otel_enabled: bool = False
+    # Empty -> ConsoleSpanExporter (stdout). Set to a real OTLP/HTTP collector
+    # endpoint (e.g. a self-hosted LangSmith/Phoenix OTLP ingester) to export
+    # there instead. No direct LangSmith SDK integration — no key on this
+    # machine; anything speaking OTLP/HTTP works via this one setting.
+    otel_endpoint: str = ""
 
 
 @lru_cache

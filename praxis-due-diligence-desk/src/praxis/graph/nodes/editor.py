@@ -19,6 +19,7 @@ from praxis.graph.context import (
 from praxis.graph.prompts import EDITOR
 from praxis.graph.recommend import derive_recommendation
 from praxis.graph.state import DossierState
+from praxis.obs import span
 from praxis.schemas import PLACEHOLDER_SOURCE_IDS, RUBRIC_SECTIONS, DossierMemo, MemoSection
 
 
@@ -73,14 +74,15 @@ def _reconcile_sections(sections: list[MemoSection], state: DossierState) -> lis
 
 
 async def editor(state: DossierState, config: RunnableConfig) -> dict:
-    llm = llm_from(config)
-    memo = await llm.agenerate(
-        system=EDITOR,
-        user=_context(state),
-        schema=DossierMemo,
-        role="editor",
-    )
-    memo.subject = state["subject"]
-    memo.sections = _reconcile_sections(memo.sections, state)
-    memo.recommendation, memo.confidence = derive_recommendation(state)
-    return {"memo": memo}
+    with span("editor", role="editor"):
+        llm = llm_from(config)
+        memo = await llm.agenerate(
+            system=EDITOR,
+            user=_context(state),
+            schema=DossierMemo,
+            role="editor",
+        )
+        memo.subject = state["subject"]
+        memo.sections = _reconcile_sections(memo.sections, state)
+        memo.recommendation, memo.confidence = derive_recommendation(state)
+        return {"memo": memo}

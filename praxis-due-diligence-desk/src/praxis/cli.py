@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 
 from praxis.graph import run_dossier
+from praxis.obs import setup_tracing
 from praxis.rag import get_corpus, ingest_source, search_corpus
 from praxis.render import to_markdown
 from praxis.schemas import DossierRequest
@@ -52,6 +53,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    setup_tracing()
     parser = argparse.ArgumentParser(prog="praxis", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

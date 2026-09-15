@@ -59,8 +59,9 @@ async def stream_dossier(
         await session.commit()
 
     settings = get_settings()
+    llm = get_llm()
     config = {
-        "configurable": {"llm": get_llm(), "corpus": corpus, "thread_id": run.id},
+        "configurable": {"llm": llm, "corpus": corpus, "thread_id": run.id},
         "max_concurrency": settings.research_concurrency,
     }
     state = initial_state(request.subject, request.depth)
@@ -81,7 +82,7 @@ async def stream_dossier(
                     yield _sse_frame("node_end", {"node": name, "partial": partial})
 
             snapshot = await graph.aget_state({"configurable": {"thread_id": run.id}})
-            response = to_response(request, snapshot.values)
+            response = to_response(request, snapshot.values, llm)
     except Exception as exc:  # noqa: BLE001 - the stream itself is the error channel now
         run.status = "failed"
         run.error = str(exc)

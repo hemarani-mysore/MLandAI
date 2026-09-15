@@ -22,6 +22,7 @@ from praxis.config import get_settings
 from praxis.graph.context import corpus_from, external_tools_from, llm_from
 from praxis.graph.prompts import RESEARCHER
 from praxis.graph.state import DossierState
+from praxis.obs import span
 from praxis.rag import RetrievedChunk, search_corpus
 from praxis.schemas import Citation, Evidence
 
@@ -129,42 +130,43 @@ async def _web_search_evidence(question: str, section: str, tool: BaseTool) -> E
 async def research_one(task: ResearchTask, config: RunnableConfig) -> dict[str, Any]:
     """Answer exactly one sub-question. Runs as a fanned-out ``Send`` branch, so
     its input is a single ``ResearchTask``, not the full ``DossierState``."""
-    llm = llm_from(config)
-    corpus = corpus_from(config)
-    k = get_settings().retrieval_k
     subject, section, question = task["subject"], task["section"], task["question"]
+    with span("research_one", role="research_one", section=section):
+        llm = llm_from(config)
+        corpus = corpus_from(config)
+        k = get_settings().retrieval_k
 
-    # search_corpus is sync (a real embedder makes a blocking HTTP call inside
-    # it) — run it off the event loop so concurrent branches don't serialize.
-    hits = await asyncio.to_thread(search_corpus, question, k=k, corpus=corpus)
-    evidence: Evidence | None
-    if hits:
-        evidence = await llm.agenerate(
-            system=RESEARCHER,
-            user=(
-                f"Subject: {subject}\n"
-                f"Section: {section}\n"
-                f"Question: {question}\n\n"
-                f"Retrieved context:\n{_render_hits(hits)}"
-            ),
-            schema=Evidence,
-            role="researcher",
-        )
-        evidence = _ground(evidence, hits)
-    else:
-        evidence = None
-        web_search = external_tools_from(config).get("web_search")
-        if web_search is not None:
-            evidence = await _web_search_evidence(question, section, web_search)
-        if evidence is None:
-            evidence = Evidence(
-                question=question,
-                section=section,
-                claim=f"No corpus evidence found for: {question}",
-                stance="neutral",
-                citation=_NO_SOURCE,
-                confidence=0.0,
+        # search_corpus is sync (a real embedder makes a blocking HTTP call inside
+        # it) — run it off the event loop so concurrent branches don't serialize.
+        hits = await asyncio.to_thread(search_corpus, question, k=k, corpus=corpus)
+        evidence: Evidence | None
+        if hits:
+            evidence = await llm.agenerate(
+                system=RESEARCHER,
+                user=(
+                    f"Subject: {subject}\n"
+                    f"Section: {section}\n"
+                    f"Question: {question}\n\n"
+                    f"Retrieved context:\n{_render_hits(hits)}"
+                ),
+                schema=Evidence,
+                role="researcher",
             )
-    evidence.question = question
-    evidence.section = section
-    return {"evidence": [evidence]}
+            evidence = _ground(evidence, hits)
+        else:
+            evidence = None
+            web_search = external_tools_from(config).get("web_search")
+            if web_search is not None:
+                evidence = await _web_search_evidence(question, section, web_search)
+            if evidence is None:
+                evidence = Evidence(
+                    question=question,
+                    section=section,
+                    claim=f"No corpus evidence found for: {question}",
+                    stance="neutral",
+                    citation=_NO_SOURCE,
+                    confidence=0.0,
+                )
+        evidence.question = question
+        evidence.section = section
+        return {"evidence": [evidence]}

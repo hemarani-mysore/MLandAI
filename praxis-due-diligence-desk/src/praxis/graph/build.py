@@ -42,10 +42,19 @@ NODE_NAMES = frozenset(
 )
 
 
-def to_response(request: DossierRequest, final: DossierState) -> DossierResponse:
+def to_response(
+    request: DossierRequest, final: DossierState, llm: StructuredLLM
+) -> DossierResponse:
     """Build the API response from a finished run's state — shared by
     ``arun_dossier`` (the `ainvoke` return value) and the SSE streaming path
-    (``graph.aget_state(...).values``, once the checkpointed run reaches END)."""
+    (``graph.aget_state(...).values``, once the checkpointed run reaches END).
+
+    ``llm`` is the same ``StructuredLLM`` instance that made every call this
+    run (threaded through ``config["configurable"]["llm"]`` for the whole
+    run) — its running ``total_prompt_tokens``/``total_completion_tokens``/
+    ``total_cost_usd`` (see ``llm.py``) become this response's ``tokens``/
+    ``cost_usd``.
+    """
     assert final["plan"] is not None
     assert final["memo"] is not None
     assert final["verification"] is not None
@@ -64,6 +73,12 @@ def to_response(request: DossierRequest, final: DossierState) -> DossierResponse
         evidence_count=len(final["evidence"]),
         iterations=final["iteration"],
         sources=sources,
+        cost_usd=llm.total_cost_usd,
+        tokens={
+            "prompt": llm.total_prompt_tokens,
+            "completion": llm.total_completion_tokens,
+            "total": llm.total_prompt_tokens + llm.total_completion_tokens,
+        },
     )
 
 
@@ -150,7 +165,8 @@ async def arun_dossier(
     graph = build_graph(checkpointer)
     if external_tools is None:
         external_tools = await load_external_tools()
-    configurable: dict = {"llm": llm or get_llm(), "external_tools": external_tools}
+    llm = llm or get_llm()
+    configurable: dict = {"llm": llm, "external_tools": external_tools}
     if corpus is not None:
         configurable["corpus"] = corpus
     if max_gap_loops is not None:
@@ -167,7 +183,7 @@ async def arun_dossier(
         initial_state(request.subject, request.depth),
         config={"configurable": configurable, "max_concurrency": concurrency},
     )
-    return to_response(request, final)
+    return to_response(request, final, llm)
 
 
 def run_dossier(

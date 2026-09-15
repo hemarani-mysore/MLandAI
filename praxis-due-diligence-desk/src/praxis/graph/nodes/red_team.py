@@ -11,23 +11,25 @@ from praxis.graph.context import llm_from, max_gap_loops, render_case, render_ev
 from praxis.graph.nodes.researcher import dispatch_gap_fill
 from praxis.graph.prompts import RED_TEAM
 from praxis.graph.state import DossierState
+from praxis.obs import span
 from praxis.schemas import RedTeamReport
 
 
 async def red_team(state: DossierState, config: RunnableConfig) -> dict:
-    llm = llm_from(config)
-    report = await llm.agenerate(
-        system=RED_TEAM,
-        user=(
-            f"Subject: {state['subject']}\n\n"
-            f"Evidence:\n{render_evidence(state)}\n\n"
-            f"{render_case('BULL', state['bull'])}\n\n"
-            f"{render_case('BEAR', state['bear'])}"
-        ),
-        schema=RedTeamReport,
-        role="red_team",
-    )
-    return {"redteam": report, "iteration": state["iteration"] + 1}
+    with span("red_team", role="red_team"):
+        llm = llm_from(config)
+        report = await llm.agenerate(
+            system=RED_TEAM,
+            user=(
+                f"Subject: {state['subject']}\n\n"
+                f"Evidence:\n{render_evidence(state)}\n\n"
+                f"{render_case('BULL', state['bull'])}\n\n"
+                f"{render_case('BEAR', state['bear'])}"
+            ),
+            schema=RedTeamReport,
+            role="red_team",
+        )
+        return {"redteam": report, "iteration": state["iteration"] + 1}
 
 
 def route_after_red_team(

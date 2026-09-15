@@ -134,6 +134,14 @@ class DossierResponse(BaseModel):
     sources: list[str] = Field(
         default_factory=list, description="Distinct corpus source ids the evidence drew on"
     )
+    cost_usd: float = Field(
+        default=0.0,
+        description="Estimated USD cost of every LLM call this run made (0.0 on the fake provider, or for any model not in llm.py's PRICING_USD_PER_1M table)",
+    )
+    tokens: dict[str, int] = Field(
+        default_factory=lambda: {"prompt": 0, "completion": 0, "total": 0},
+        description="Token usage across every LLM call this run made",
+    )
 
 
 class DossierRunRecord(BaseModel):

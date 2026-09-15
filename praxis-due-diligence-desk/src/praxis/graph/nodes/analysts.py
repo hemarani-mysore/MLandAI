@@ -9,6 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from praxis.graph.context import llm_from, render_evidence
 from praxis.graph.prompts import ANALYST_BEAR, ANALYST_BULL
 from praxis.graph.state import DossierState
+from praxis.obs import span
 from praxis.schemas import Finding
 
 _SYSTEM = {"bull": ANALYST_BULL, "bear": ANALYST_BEAR}
@@ -26,16 +27,17 @@ def _clip_refs(refs: list[int], n: int) -> list[int]:
 async def _analyst(
     state: DossierState, config: RunnableConfig, stance: Literal["bull", "bear"]
 ) -> dict:
-    llm = llm_from(config)
-    finding = await llm.agenerate(
-        system=_SYSTEM[stance],
-        user=f"Subject: {state['subject']}\n\nEvidence:\n{render_evidence(state)}",
-        schema=Finding,
-        role=f"{stance}_analyst",
-    )
-    finding.stance = stance
-    finding.evidence_refs = _clip_refs(finding.evidence_refs, len(state["evidence"]))
-    return {stance: finding}
+    with span(f"{stance}_analyst", role=f"{stance}_analyst"):
+        llm = llm_from(config)
+        finding = await llm.agenerate(
+            system=_SYSTEM[stance],
+            user=f"Subject: {state['subject']}\n\nEvidence:\n{render_evidence(state)}",
+            schema=Finding,
+            role=f"{stance}_analyst",
+        )
+        finding.stance = stance
+        finding.evidence_refs = _clip_refs(finding.evidence_refs, len(state["evidence"]))
+        return {stance: finding}
 
 
 async def bull(state: DossierState, config: RunnableConfig) -> dict:
