@@ -35,6 +35,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13",
     "fakeredis>=2.20",
+    "pyyaml>=6.0",  # evals/datasets/golden_dossiers/index.yaml (Phase 4)
 ]
 # Optional heavier retrieval backends (not needed for the deterministic path / CI):
 rerank = ["sentence-transformers>=3.0"]

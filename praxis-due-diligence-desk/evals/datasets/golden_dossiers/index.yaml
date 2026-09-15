@@ -1,0 +1,70 @@
+# Golden due-diligence dataset for Phase 4's LLM-as-judge eval harness.
+#
+# Each item is a directory (evals/datasets/golden_dossiers/<id>/) with:
+#   sources/*.md   — 1-2 short, synthetic company-profile documents
+#   memo.md        — the frozen memo text the judge grades (dev/test items
+#                    only — the one `online` item has no frozen memo; a fresh
+#                    one is generated from sources/ at eval time instead)
+#
+# `label` is the expert's pass/fail verdict on that item's memo (or, for the
+# `online` item, the *expected* verdict on whatever gets freshly generated —
+# used to spot drift over time, not as a hard per-run failure). `critique`
+# names the specific reasoning behind the verdict.
+#
+# Splits: dev (4, judged live — calibration) / test (3, frozen + recorded
+# verdicts — CI-gated) / online (1, fresh generation — nightly drift check).
+items:
+  - id: orbitfleet-logistics
+    split: dev
+    label: pass
+    critique: >-
+      Recommendation (proceed_with_conditions) is well supported by the
+      evidence; the conference-driven pipeline risk is correctly surfaced
+      rather than glossed over.
+  - id: solace-health-analytics
+    split: dev
+    label: pass
+    critique: >-
+      Strong, consistent evidence trail; sales-cycle length and
+      systems-integrator dependency are both named plainly. A clean pass.
+  - id: driftwood-materials
+    split: dev
+    label: fail
+    critique: >-
+      The memo mentions the Q2 customer loss only in passing and omits the
+      FTC pricing inquiry from Risks & Red Flags entirely, then recommends
+      proceed with high confidence — materially understates risk that is
+      plainly present in the sources.
+  - id: brightloom-foods
+    split: dev
+    label: pass
+    critique: >-
+      Growth deceleration and single-facility concentration are both named
+      and reflected in a conditional recommendation rather than papered over.
+  - id: cascade-fintech
+    split: test
+    label: pass
+    critique: >-
+      Identifies the missing dedicated compliance officer as a real gap for a
+      payments company and conditions the recommendation on closing it.
+  - id: ferrovia-rail-tech
+    split: test
+    label: fail
+    critique: >-
+      Sources are a single sparse paragraph with no financials, market
+      sizing, or IP status, yet the memo invents specific market-size and
+      traction figures not present anywhere in the sources and still
+      recommends proceed — should have concluded insufficient_evidence.
+  - id: meridian-cyber
+    split: test
+    label: pass
+    critique: >-
+      Customer-concentration figures are disclosed with enough context to
+      judge them as healthy diversification, not glossed over.
+  - id: tundra-robotics
+    split: online
+    label: pass
+    critique: >-
+      Expected verdict for the online drift check — no frozen memo; a fresh
+      dossier is generated from sources/ each run and judged against this
+      expectation to surface drift, not scored as a hard failure.
