@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     strong_model: str = "openai:gpt-4o"  # planner + bull/bear analysts
     fast_model: str = "openai:gpt-4o-mini"  # editor + red_team
     # Roles that run on the cheaper/faster tier (calibration + synthesis work).
-    fast_roles: tuple[str, ...] = ("editor", "red_team", "evidence_lookup", "judge")
+    fast_roles: tuple[str, ...] = ("editor", "red_team", "evidence_lookup", "judge", "entailment")
     nebius_base_url: str = NEBIUS_BASE_URL
 
     # --- Retrieval / RAG ---

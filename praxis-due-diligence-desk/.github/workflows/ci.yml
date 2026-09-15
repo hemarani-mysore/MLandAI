@@ -46,6 +46,8 @@ jobs:
       - run: uv run python evals/rag_eval.py --gate
       - run: uv run python evals/memo_structure_eval.py --gate
       - run: uv run python evals/memo_eval.py --split test --gate
+      - run: uv run python evals/citation_eval.py --gate
+      - run: uv run python evals/redteam_eval.py --gate
 
   mcp-contract:
     name: mcp-contract

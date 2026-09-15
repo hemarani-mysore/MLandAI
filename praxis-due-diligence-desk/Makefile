@@ -1,5 +1,6 @@
 .PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate \
-        eval-structure eval-structure-gate eval-dev eval-test eval-test-gate clean
+        eval-structure eval-structure-gate eval-dev eval-test eval-test-gate \
+        eval-citation eval-citation-gate eval-redteam eval-redteam-gate clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -39,7 +40,20 @@ eval-test:  ## LLM-as-judge vs expert labels, test split (recorded, offline)
 eval-test-gate:  ## Judge-vs-expert F1 gate on the recorded test split (used in CI)
 	uv run python evals/memo_eval.py --split test --gate
 
-check: lint type test eval-rag-gate eval-structure-gate eval-test-gate  ## Everything CI runs
+eval-citation:  ## Citation-integrity self-check (report)
+	uv run python evals/citation_eval.py
+
+eval-citation-gate:  ## Citation-integrity self-check as a gate (used in CI)
+	uv run python evals/citation_eval.py --gate
+
+eval-redteam:  ## Seeded-error detection, recorded fixtures (report)
+	uv run python evals/redteam_eval.py
+
+eval-redteam-gate:  ## Seeded-error detection rate as a gate (used in CI)
+	uv run python evals/redteam_eval.py --gate
+
+check: lint type test eval-rag-gate eval-structure-gate eval-test-gate \
+       eval-citation-gate eval-redteam-gate  ## Everything CI runs
 
 run: demo  ## alias
 

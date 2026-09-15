@@ -1,0 +1,70 @@
+{
+  "contradicted-churn": {
+    "unsupported_claims": [
+      "Nimbus has zero customer churn, indicating exceptional product-market fit."
+    ],
+    "contradictions": [
+      "Nimbus reports a 15% annual customer churn rate, which contradicts the claim of zero customer churn."
+    ],
+    "coverage_gaps": [
+      "Market & Competition",
+      "Traction & Financials"
+    ],
+    "gap_questions": [
+      "What is the specific market share of Nimbus compared to its well-funded competitors?",
+      "What are the revenue trends or growth metrics for Nimbus over the past few years?"
+    ]
+  },
+  "contradicted-patents": {
+    "unsupported_claims": [
+      "Vertex has no patents, leaving its process easily replicable by competitors."
+    ],
+    "contradictions": [
+      "Vertex holds 3 issued patents on its core alloy process contradicts the statement that Vertex has no patents."
+    ],
+    "coverage_gaps": [
+      "Market & Competition",
+      "Traction & Financials"
+    ],
+    "gap_questions": [
+      "What is the actual market share of Vertex compared to its competitors and how does this relate to revenue growth?",
+      "What specific financial metrics support the claim of steady revenue growth over the past two years?"
+    ]
+  },
+  "contradicted-profitability": {
+    "unsupported_claims": [
+      "Claims about durable margins are not supported by details on revenue growth, market conditions, or margin sustainability over time.",
+      "The bear case mentions recent losses but does not provide a comparative context of previous quarters' financial health."
+    ],
+    "contradictions": [
+      "The bull case claims consistent profitability since 2021 without addressing the bear case's mention of significant recent net losses.",
+      "The bear case suggests a concerning reversal based on recent losses, which contradicts the bull case's assertion of a stable outlook from consistent EBITDA profits."
+    ],
+    "coverage_gaps": [
+      "Market & Competition is under-covered; there's no evidence provided on how Globex's market position influences its profitability or losses.",
+      "Risks & Red Flags lack detail on potential causes for the recent net losses and future implications."
+    ],
+    "gap_questions": [
+      "What are the specific factors contributing to recent net losses at Globex, and how do they compare to historical performance?",
+      "How does the competitive landscape impact Globex's margins, and what is its market share relative to competitors?"
+    ]
+  },
+  "fabricated-funding-round": {
+    "unsupported_claims": [
+      "Acme secured a $50M Series C round, well beyond typical for its stage."
+    ],
+    "contradictions": [
+      "The BULL case states that Acme secured a $50M Series C round, while the evidence includes only information about a $12M Series A in 2022 and does not mention any Series C funding."
+    ],
+    "coverage_gaps": [
+      "Market & Competition",
+      "Team & Funding",
+      "Risks & Red Flags"
+    ],
+    "gap_questions": [
+      "What is Acme Robotics' position in the competitive landscape and who are their primary competitors?",
+      "What is the background and experience of Acme Robotics' leadership team, and how does it impact the company's growth?",
+      "What specific risks does Acme Robotics face in terms of market dynamics, technology, and execution?"
+    ]
+  }
+}
