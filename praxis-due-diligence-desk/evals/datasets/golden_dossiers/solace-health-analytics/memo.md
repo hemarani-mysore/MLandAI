@@ -1,15 +1,15 @@
 # Due-Diligence Memo — Solace Health Analytics
 
-**Recommendation:** `proceed`  ·  **Confidence:** 75%
+**Recommendation:** `proceed_with_conditions`  ·  **Confidence:** 75%
 
 ## Summary
 
 Solace is a Series C claims-analytics vendor for mid-size health payers with
 strong, consistent metrics across growth (40% YoY), retention (118% NRR), and
-differentiated IP (three issued patents). The two named risks — long sales
-cycles and partner-channel dependency — are structural to the payer-software
-category rather than company-specific red flags, and are disclosed plainly
-rather than downplayed.
+differentiated IP (three issued patents). The recommendation is conditioned
+on the two named risks — 9-14 month sales cycles and 35% of pipeline running
+through two systems-integrator partners — which are disclosed plainly at the
+scale the sources describe, not minimized.
 
 ## Overview
 
@@ -56,10 +56,9 @@ land-and-stall.
 
 ## Risks & Red Flags
 
-Enterprise sales cycles of 9-14 months limit near-term revenue predictability,
-and roughly 35% of new pipeline depends on two systems-integrator partners
-rather than a fully direct motion — both real, disclosed constraints rather
-than fatal flaws, and typical for the payer-software category broadly.
+Enterprise sales cycles run 9-14 months, which limits near-term revenue
+predictability, and roughly 35% of new pipeline depends on two
+systems-integrator partners rather than a fully direct motion.
 
 > [solace-overview] Solace Health Analytics Company Overview — company-overview.md: "Two systems-integrator partners (regional health-IT consultancies) source roughly 35% of new pipeline; the remainder is direct enterprise sales."
 

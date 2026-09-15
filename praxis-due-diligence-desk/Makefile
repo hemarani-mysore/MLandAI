@@ -1,5 +1,5 @@
 .PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate \
-        eval-structure eval-structure-gate clean
+        eval-structure eval-structure-gate eval-dev eval-test eval-test-gate clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -30,7 +30,16 @@ eval-structure:  ## Deterministic memo-structure eval (report)
 eval-structure-gate:  ## Memo-structure eval as a pass/fail gate (used in CI)
 	uv run python evals/memo_structure_eval.py --gate
 
-check: lint type test eval-rag-gate eval-structure-gate  ## Everything CI runs
+eval-dev:  ## LLM-as-judge vs expert labels, dev split (live model, calibration)
+	uv run python evals/memo_eval.py --split dev
+
+eval-test:  ## LLM-as-judge vs expert labels, test split (recorded, offline)
+	uv run python evals/memo_eval.py --split test
+
+eval-test-gate:  ## Judge-vs-expert F1 gate on the recorded test split (used in CI)
+	uv run python evals/memo_eval.py --split test --gate
+
+check: lint type test eval-rag-gate eval-structure-gate eval-test-gate  ## Everything CI runs
 
 run: demo  ## alias
 

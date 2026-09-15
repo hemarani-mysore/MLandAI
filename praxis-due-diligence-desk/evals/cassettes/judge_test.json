@@ -1,0 +1,14 @@
+{
+  "cascade-fintech": {
+    "label": "pass",
+    "critique": "The memo accurately reflects concerns about the lack of a dedicated in-house compliance officer while processing $340M in annualized payment volume, aligning perfectly with the source material. It recommends `proceed_with_conditions`, which is appropriate given the material risk presented by this compliance gap."
+  },
+  "ferrovia-rail-tech": {
+    "label": "fail",
+    "critique": "The memo incorrectly recommends `proceed` while omitting the specific fact that Ferrovia currently has no revenue, which the sources clearly state. This omission significantly alters the understanding of the company's stage and risk profile, justifying a more cautious recommendation."
+  },
+  "meridian-cyber": {
+    "label": "pass",
+    "critique": "The memo accurately reflects the source material, including key statistics like the 22% concentration of ARR from the top 5 customers, which is explicitly noted as a moderate concern rather than alarming, consistent with the source's characterization. All relevant numbers, events, and claims from the source material are present in the memo and properly contextualized."
+  }
+}

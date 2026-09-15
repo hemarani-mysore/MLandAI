@@ -7,7 +7,7 @@ name: CI
 # never actually committed until Phase 3 — this file closes that gap as well
 # as adding Phase 3's own `mcp-contract` job.
 #
-# Nightly (real cheap model, full eval suite) is Phase 4+ scope — not here.
+# Nightly (real cheap model, full eval suite) is a separate workflow.
 
 on:
   push:
@@ -45,6 +45,7 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run python evals/rag_eval.py --gate
       - run: uv run python evals/memo_structure_eval.py --gate
+      - run: uv run python evals/memo_eval.py --split test --gate
 
   mcp-contract:
     name: mcp-contract
