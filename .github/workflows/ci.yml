@@ -61,5 +61,73 @@ jobs:
       - name: Memo-structure eval (deterministic, gated)
         run: uv run python evals/memo_structure_eval.py --gate
 
-  # Phase 4 will add: LLM-as-judge F1 + RAGAS on a fixed slice to the eval gate.
-  # Phase 5 will add: docker build -> GHCR, and `kind` smoke test of deploy/k8s.
+      - name: LLM-as-judge vs expert labels (recorded, offline)
+        run: uv run python evals/memo_eval.py --split test --gate
+
+      - name: Citation-integrity self-check
+        run: uv run python evals/citation_eval.py --gate
+
+      - name: Seeded-error detection (recorded, offline)
+        run: uv run python evals/redteam_eval.py --gate
+
+  mcp-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: MCP server + parity + external-tools contract tests
+        run: >
+          uv run pytest
+          tests/test_mcp_server.py
+          tests/test_mcp_parity.py
+          tests/test_mcp_tools_loader.py
+          tests/test_researcher_web_fallback.py
+          -v
+
+  postgres-contract:
+    runs-on: ubuntu-latest
+    # No Postgres exists on the machine this was developed on — this job is
+    # the actual verification that PRAXIS_DATABASE_URL=postgresql+asyncpg://
+    # really works, not just that the URL string is well-formed.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: praxis
+          POSTGRES_PASSWORD: praxis
+          POSTGRES_DB: praxis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PRAXIS_DATABASE_URL: postgresql+asyncpg://praxis:praxis@localhost:5432/praxis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Apply migrations to the real Postgres service container
+        run: uv run alembic upgrade head
+      - name: Confirm the models and the migration haven't drifted
+        run: uv run alembic check
+      - name: DB-touching tests against real Postgres
+        run: >
+          uv run pytest
+          tests/test_db_models.py
+          tests/test_db_url.py
+          tests/test_db_engine_real.py
+          tests/test_api_runs.py
+          -v
+
+  # Phase 5 will add: docker build -> GHCR, kubeconform/kustomize validation,
+  # and a `kind` smoke test of deploy/k8s (slices 2-4).

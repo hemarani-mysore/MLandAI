@@ -1,4 +1,4 @@
-name: Nightly
+name: praxis-nightly
 
 # Full eval suite against a real cheap model — dev (judge calibration) + test
 # (recorded, still run here so a drift in behaviour shows up even though it
@@ -11,15 +11,18 @@ on:
     - cron: "0 7 * * *" # 07:00 UTC daily
   workflow_dispatch:
 
+defaults:
+  run:
+    working-directory: praxis-due-diligence-desk
+
 jobs:
   nightly-eval:
-    name: nightly-eval
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
         with:
-          version: "latest"
+          enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --extra dev
       - name: Check for OPENAI_API_KEY
@@ -47,5 +50,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: eval-reports-${{ github.run_id }}
-          path: evals/reports/*.json
+          # actions/upload-artifact's `path` is resolved from GITHUB_WORKSPACE,
+          # not affected by `defaults.run.working-directory` (that only
+          # applies to `run:` steps) — needs the explicit subdirectory prefix.
+          path: praxis-due-diligence-desk/evals/reports/*.json
           retention-days: 30
