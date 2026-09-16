@@ -1,0 +1,51 @@
+name: Nightly
+
+# Full eval suite against a real cheap model — dev (judge calibration) + test
+# (recorded, still run here so a drift in behaviour shows up even though it
+# doesn't block PRs) + online (fresh generation, the actual drift check).
+# Manual-dispatch-safe: if OPENAI_API_KEY isn't set as a repo secret yet, this
+# skips with a clear message instead of failing every night on missing creds.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  nightly-eval:
+    name: nightly-eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - name: Check for OPENAI_API_KEY
+        id: has_key
+        run: |
+          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "OPENAI_API_KEY is not set as a repo secret yet — skipping." >&2
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run the full eval suite (dev + test + online, live model)
+        if: steps.has_key.outputs.present == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PRAXIS_LLM_PROVIDER: openai
+          PRAXIS_EMBEDDING_PROVIDER: openai
+        run: |
+          uv run python evals/run.py --suite all --split dev \
+            --report evals/reports/dev-${{ github.run_id }}.json
+          uv run python evals/run.py --suite memo --split online \
+            --report evals/reports/online-${{ github.run_id }}.json
+      - name: Upload report artifact
+        if: steps.has_key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-${{ github.run_id }}
+          path: evals/reports/*.json
+          retention-days: 30

@@ -21,7 +21,7 @@ CI, Docker/Kubernetes — in one coherent project.
 | **1 — RAG** | ingestion → hybrid retrieval (Qdrant dense + BM25 → RRF → rerank) → grounded citations; corpus API + CLI; deterministic retrieval eval gating CI | ✅ **done** |
 | **2 — Multi-agent** | real prompts + multi-section editor + deterministic recommendation; researcher fan-out via `Send`; async graph end to end; run persistence + checkpointing; SSE streaming + ingestion worker | ✅ **done** |
 | **3 — MCP** | `praxis-mcp` FastMCP server (4 tools, 3 resources, 2 prompts); researcher falls back to an external `web_search` MCP tool when the corpus has nothing; CI (`quality` × 2 Python versions, `eval-gate`, `mcp-contract`) | ✅ **done** |
-| 4 — Eval framework | golden dossiers, LLM-as-judge (F1 vs expert labels), citation-integrity + seeded-error checks, OTel tracing | ⬜ |
+| **4 — Eval framework** | golden-dossier dataset (8 subjects, 2 deliberate fails) + LLM-as-judge (F1 vs expert labels, judge sees the sources, not just the memo); citation-integrity injection + NLI checks; seeded-error detection; OTel tracing + cost/token accounting; `evals/run.py` orchestrator; CI `eval-gate` (5 sub-gates) + a nightly full-suite workflow | ✅ **done** |
 | 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
 
 ## Quickstart
@@ -69,6 +69,8 @@ make check           # lint + type + test + eval gates (what CI runs)
 make demo            # ingest the fixture corpus, run a grounded dossier
 make eval-rag        # retrieval eval report
 make eval-structure  # memo-structure eval report
+make eval-gate       # every eval suite's gate, fully offline (evals/run.py)
+make eval            # every eval suite, live judge, writes a timestamped report
 ```
 
 ## The graph
@@ -160,6 +162,46 @@ configured, `research_one` calls it and cites the result by URL instead of the
 `no-source` placeholder. Unset (the default) — corpus-only, unchanged from
 Phase 2.
 
+## Evals
+
+```
+evals/
+  datasets/golden_dossiers/  8 subjects (dev=4, test=3, online=1), 2 deliberate fails
+  metric.py                  BinaryLLMJudgeMetric — reads (subject, sources, memo)
+  memo_eval.py                --split {dev,test,online}: judge-vs-expert F1
+  citation_eval.py            fabricated-citation injection self-check + --nli
+  redteam_eval.py             seeded false-claim detection, 4 fixtures
+  run.py                      --suite {rag,structure,memo,citation,redteam,all} --gate --report
+  cassettes/                  real verdicts recorded once, replayed offline for CI
+```
+
+The judge is deliberately **not** reference-free with respect to the sources
+— it reads the raw source material alongside the memo, because catching
+either of the dataset's two deliberate failure modes (a disclosed risk
+reduced to vague language and partly omitted; a sparse source inflated with
+invented specifics) requires comparing the memo against what its sources
+actually said, not just checking the memo's own internal consistency. The
+judge prompt was calibrated against a real model until dev/test agreement
+with the expert labels reached 4/4 and 3/3 — see
+`evals/datasets/golden_dossiers/README.md` for the worked examples.
+
+`--split test` (the CI-gated one) and `redteam_eval.py --gate` never make a
+network call: both replay real verdicts recorded once against an actual
+model, through the same `FakeStructuredLLM(overrides=...)` scripting the rest
+of the test suite already uses — not a new cassette dependency.
+
+Every LLM call also carries OpenTelemetry spans (`role`, and for the six
+LLM-calling nodes `model`/`prompt_tokens`/`completion_tokens`/`cost_usd`) —
+gated on `PRAXIS_OTEL_ENABLED`, exporting to stdout by default or a real
+OTLP/HTTP collector via `PRAXIS_OTEL_ENDPOINT`. `DossierResponse.cost_usd`/
+`.tokens` report the same totals for the whole run.
+
+```bash
+make eval-gate   # every gate, offline — what CI's eval-gate job runs
+make eval-dev    # judge-vs-expert F1, live model, dev split
+make eval-online # nightly drift check: fresh generation + live judge
+```
+
 ## Layout
 
 ```
@@ -172,12 +214,16 @@ src/praxis/
   worker/ __init__.py                  # arq ingest_task + WorkerSettings
   mcp/    server.py __main__.py         # praxis-mcp — tools/resources/prompts over the same library code
   tools/  mcp_tools.py                  # load_external_tools() — the researcher's web-search fallback
-  obs/    __init__.py                 # OTel hooks (Phase 4)
-tests/                                 # 95 tests: graph, fan-out, async, checkpointing, db, api runs, sse, jobs, worker, retrieval, cli, schemas, mcp server + parity + external-tools loader + web fallback
-evals/  rag_eval.py + memo_structure_eval.py + fixture corpus   # two deterministic gates (CI)
+  obs/    __init__.py                 # real OTel setup_tracing() + span()
+tests/                                 # 136 tests: graph, fan-out, async, checkpointing, db, api runs, sse,
+                                        #   jobs, worker, retrieval, cli, schemas, mcp, evals (judge/citation/
+                                        #   redteam/obs/cost), golden-dataset loader
+evals/  rag_eval.py, memo_structure_eval.py, metric.py, memo_eval.py,       # 5 gates (CI) + run.py orchestrator
+        citation_eval.py, redteam_eval.py, run.py, datasets/, cassettes/
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
-.github/workflows/ci.yml               # quality (3.11/3.12) + eval-gate + mcp-contract
+.github/workflows/ci.yml               # quality (3.11/3.12) + eval-gate (5 gates) + mcp-contract
+.github/workflows/nightly.yml          # full eval suite, live model, report artifact
 .mcp.json                              # Claude Code / Cursor config for praxis-mcp
 ```
 

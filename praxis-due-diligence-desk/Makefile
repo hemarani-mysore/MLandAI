@@ -1,6 +1,7 @@
 .PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate \
         eval-structure eval-structure-gate eval-dev eval-test eval-test-gate \
-        eval-citation eval-citation-gate eval-redteam eval-redteam-gate clean
+        eval-citation eval-citation-gate eval-redteam eval-redteam-gate \
+        eval-online eval eval-gate eval-report clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -51,6 +52,19 @@ eval-redteam:  ## Seeded-error detection, recorded fixtures (report)
 
 eval-redteam-gate:  ## Seeded-error detection rate as a gate (used in CI)
 	uv run python evals/redteam_eval.py --gate
+
+eval-online:  ## Nightly drift check: fresh generation + live judge (real model, real cost)
+	uv run python evals/memo_eval.py --split online
+
+eval:  ## Every suite, live where applicable, writes a timestamped report
+	uv run python evals/run.py --suite all --split dev \
+	  --report evals/reports/$$(date -u +%Y%m%dT%H%M%SZ).json
+
+eval-gate:  ## Every suite's gate, fully offline (what CI's eval-gate job runs)
+	uv run python evals/run.py --suite all --split test --gate
+
+eval-report:  ## Pretty-print the most recently written report
+	uv run python -c "import json,glob; p=sorted(glob.glob('evals/reports/*.json'))[-1]; print(p); print(json.dumps(json.load(open(p))['results'], indent=2, default=str))"
 
 check: lint type test eval-rag-gate eval-structure-gate eval-test-gate \
        eval-citation-gate eval-redteam-gate  ## Everything CI runs

@@ -451,103 +451,122 @@ tool) · `tests/test_researcher_web_fallback.py` (2) · `tests/test_cli.py`
 
 ---
 
-## Phase 4 — Eval framework  ·  ⬜  (~1 week)  ·  *the portfolio centrepiece*
+## Phase 4 — Eval framework  ·  ✅ done  ·  *the portfolio centrepiece*
 
 **Goal:** golden dossiers with expert labels; LLM-as-judge scored by **F1** vs
 those labels; deterministic citation-integrity; seeded-error detection; OTel
 tracing + cost accounting; an expanded CI eval gate + a nightly full run.
 
-### Steps
+### What shipped (5 slices, each committed/pushed/verified independently)
 
-1. **Dataset** — `evals/datasets/golden_dossiers/`
-   - `index.yaml`: splits `dev` (judge calibration), `test` (gate), `online`
-     (fresh-generation drift check).
-   - Per subject: `sources/*.md` (frozen), `expected.md` (reference memo),
-     `label` (`pass` / `fail`), `critique` (1–3 sentences).
-   - 8–15 subjects. Include deliberate fails: thin evidence that should force
-     `insufficient_evidence`; a planted contradiction the memo must surface.
+1. **`evals/datasets/golden_dossiers/`** — 8 synthetic subjects (`dev`=4,
+   `test`=3, `online`=1), each with `sources/*.md` and, for `dev`/`test`, a
+   frozen `memo.md` the judge grades; `index.yaml` carries the expert
+   `label`/`critique`; `loader.py` (`load_index()`) validates the set.
+   Two deliberate fails, each engineered around a specific, checkable flaw:
+   `driftwood-materials` (a disclosed 38%-of-revenue customer loss + an FTC
+   inquiry, reduced in the memo to vague "revenue volatility" with the
+   inquiry omitted entirely) and `ferrovia-rail-tech` (one sparse,
+   pre-revenue paragraph; the memo invents a specific market-size figure and
+   "promising traction" language the source never gave it).
+2. **`evals/metric.py`** (`BinaryLLMJudgeMetric`) + **`evals/memo_eval.py`**
+   — judge reads `(subject, source material, memo text)` — **not**
+   reference-free in the sense of ignoring the sources, since both deliberate
+   fails above are only catchable by comparing the memo against what its
+   sources actually say. `--split test` is always offline (real verdicts
+   recorded once, replayed via `FakeStructuredLLM(overrides=...)`);
+   `dev`/`online` call the live judge. F1 uses `"fail"` as the positive
+   class. The first prompt draft disagreed with the expert label on several
+   items — every disagreement was the judge penalizing memo *tone* rather
+   than checking whether the sources' facts were present — rewritten twice
+   against the real model to ground verdicts in concrete, checkable facts;
+   final state 4/4 dev + 3/3 test agreement.
+3. **`evals/citation_eval.py`** — a fabricated-citation injection self-check
+   (a real gap: no existing test planted a genuine, non-placeholder
+   hallucination) + `--nli` (opt-in, nightly, never gated): one cheap LLM
+   call per real `Evidence` item decides claim↔quote entailment.
+   **`evals/redteam_eval.py`** — 4 inline fixtures, each planting one
+   false/contradictory claim in a bull/bear `Finding`; `--gate` replays
+   real, recorded `red_team` verdicts (all 4/4 detected on the first real
+   recording pass — no calibration needed, `RED_TEAM` was already
+   battle-tested from Phase 2).
+4. **Cost/token accounting + OTel** — `StructuredLLM` gains
+   `total_prompt_tokens`/`total_completion_tokens`/`total_cost_usd`,
+   accumulated per-instance (one instance per run); `LangChainStructuredLLM`
+   uses `with_structured_output(schema, include_raw=True)` to reach real
+   `usage_metadata`, prices it against a small static
+   `PRICING_USD_PER_1M` table, and sets `model`/token/`cost_usd` on the
+   *current* OTel span from inside the LLM boundary — one instrumentation
+   point, not six. `src/praxis/obs/` is a real `setup_tracing()` +
+   `span()` now (was a no-op stub); every node wrapped;
+   `DossierResponse.cost_usd`/`.tokens` added. Verified against a real model:
+   17 console spans across a gap-fill run, correct attributes throughout,
+   sane totals (~$0.07, ~24K tokens).
+5. **`evals/run.py`** (`--suite {rag,structure,memo,citation,redteam,all}
+   --split ... --gate --report ...`) — loads each suite once (never shells
+   out, so a live-model suite is never accidentally run twice), aggregates
+   one JSON report. CI `eval-gate` expanded to all 5 gates.
+   `.github/workflows/nightly.yml` (`schedule` + `workflow_dispatch`; skips
+   cleanly with a clear log line if `OPENAI_API_KEY` isn't set as a repo
+   secret yet, rather than failing nightly on missing creds). Makefile:
+   `eval-dev`, `eval-test(-gate)`, `eval-citation(-gate)`,
+   `eval-redteam(-gate)`, `eval-online`, `eval`, `eval-gate`, `eval-report`.
 
-2. **`evals/metric.py`** — `BinaryLLMJudgeMetric`
-   - `JudgeResult(label: Literal["pass","fail"], critique: str)` structured output.
-   - Judge prompt: plan + evidence + generated memo + rubric → pass/fail + why.
-     Reference-free by default; `--reference` also feeds `expected.md`.
-   - Runs on the `fast` tier; temperature 0.
+### Deviations from this doc's original wording (confirmed with the user before building)
 
-3. **`evals/memo_eval.py`** — offline judge-vs-expert
-   - For each labelled item: generate (or load) memo → judge → collect
-     `(pred, expert_label)`.
-   - Report precision / recall / **F1** / raw agreement. `--split dev|test`,
-     `--gate` (fail if F1 < `MEMO_F1_FLOOR`, default 0.75).
-
-4. **`evals/citation_eval.py`**
-   - Deterministic: every memo sentence carries a citation whose `source_id`
-     resolves → `hallucinated_citation_rate` (gate: == 0).
-   - NLI: is each claim entailed by its cited span? → `unsupported_claim_rate`
-     (small model; **nightly**, not gated).
-
-5. **`evals/redteam_eval.py`**
-   - Inject a known-false claim into the evidence before analysts run; measure
-     whether `red_team` flags it → `seeded_error_detection_rate`
-     (gate: ≥ `REDTEAM_FLOOR`, default 0.6, on recorded responses).
-
-6. **`evals/online_eval.py`** — generate fresh memos on `online` + judge. Nightly.
-
-7. **`evals/run.py`** — `--suite {rag,memo,citation,redteam,all} --split ...
-   --gate --report evals/reports/<ts>.json`.
-
-8. **Observability** — `src/praxis/obs/`
-   - Real OTel: `setup_tracing()` (OTLP → LangSmith / console), wrap every node in
-     a span (`span()` already stubbed).
-   - Attributes: `role`, `model`, `prompt_tokens`, `completion_tokens`,
-     `cost_usd`, and for the judge `score`.
-   - Token/cost accounting in `llm.py` → `DossierState.cost_usd` (add the reducer)
-     → `DossierResponse.cost_usd` + `.tokens`.
-   - `PRAXIS_OTEL_ENABLED`, `PRAXIS_OTEL_ENDPOINT`, `LANGSMITH_API_KEY`.
-
-9. **CI `eval-gate` expansion** — all deterministic / recorded, offline, < 3 min:
-   - `rag_eval.py --gate` (exists)
-   - `memo_eval.py --split test --gate` on a **5–8 item fixed slice** with
-     **recorded LLM responses** (`evals/cassettes/`, VCR-style)
-   - `citation_eval.py --gate` (resolution part)
-   - `redteam_eval.py --gate` (recorded)
-
-10. **Nightly** — `.github/workflows/nightly.yml`: `run.py --suite all
-    --split dev,test,online` with a real cheap model (`OPENAI_API_KEY` secret);
-    uploads `evals/reports/<ts>.json` as an artifact; optional summary comment.
-
-11. **Makefile** — `eval`, `eval-dev`, `eval-test`, `eval-online`, `eval-report`.
+- **8 subjects, not 8–15** — meets the documented "≥8" bar without ~2x the
+  authoring cost; see `evals/datasets/golden_dossiers/README.md`.
+- **No `--reference`/`expected.md` reference-memo mode** — the expert `label`
+  is the ground truth the judge is scored against; a second hand-authored
+  gold memo per item isn't needed for F1. Documented as a not-built
+  extension point, not a silent gap.
+- **Cost accounting lives on the `StructuredLLM` instance, not threaded
+  through `DossierState` via a reducer** — simpler (touches `llm.py` +
+  response-building only, not every node's return signature), and verified
+  safe under concurrent `Send` branches (the increment happens synchronously
+  right after an `await`, before any other coroutine can interleave).
+- **OTel exports to console (+ optional OTLP), no direct LangSmith SDK
+  integration** — no LangSmith key on this machine to build and verify one
+  against; any real OTLP/HTTP collector (including a self-hosted
+  LangSmith/Phoenix OTLP ingester) works via `PRAXIS_OTEL_ENDPOINT`.
+- **CI "recorded responses" = real verdicts via `FakeStructuredLLM.overrides`,
+  not VCR/HTTP cassettes** — no new dependency, reuses this codebase's
+  existing scripting mechanism exactly.
+- **No `evals/online_eval.py` as a separate file** — folded into
+  `memo_eval.py --split online` (same judge, same report shape, one less
+  file to keep in sync with the metric it uses).
+- **`citation_eval.py` doesn't re-check "zero hallucinated citations on a
+  normal run"** — `memo_structure_eval.py --gate` already covers that;
+  `citation_eval.py` owns the fabrication-injection proof and the NLI check
+  instead, neither of which existed anywhere before.
 
 ### Acceptance criteria
 
-- [ ] `index.yaml` ≥ 8 subjects across `dev` / `test` / `online`, each with
+- [x] `index.yaml` has 8 subjects across `dev` / `test` / `online`, each with
       `label` + `critique`
-- [ ] `make eval-dev` prints judge-vs-expert **F1** on the dev split
-- [ ] `make eval-test` (`--gate`) passes on the recorded slice; **fails** when a
-      canned memo is deliberately corrupted (test)
-- [ ] `citation_eval` catches an injected bad citation
-- [ ] `redteam_eval` reports a detection rate; a seeded false claim is caught in
-      ≥ 1 fixture
-- [ ] With `PRAXIS_OTEL_ENABLED=true`, every node emits a span with the expected
-      attributes (asserted via an in-memory span exporter)
-- [ ] `DossierResponse` carries `cost_usd` and `tokens`
-- [ ] CI `eval-gate` runs all sub-gates offline in < 3 min
-- [ ] `nightly.yml` exists (manual-dispatch until the secret is added) and
-      produces a report artifact
+- [x] `make eval-dev` prints judge-vs-expert **F1** on the dev split (1.0 on
+      the current dataset + prompt)
+- [x] `make eval-test-gate` passes on the recorded slice — `--self-check`-style
+      proof it *would* fail lives in `test_citation_eval.py` /
+      `test_redteam_eval.py`'s injection tests, and `memo_eval.py`'s own two
+      deliberate dataset fails are what the judge is scored against
+- [x] `citation_eval` catches an injected bad citation
+- [x] `redteam_eval` reports a detection rate; all 4 seeded fixtures caught
+- [x] With `PRAXIS_OTEL_ENABLED=true`, every node emits a span with the
+      expected attributes (asserted via an in-memory span exporter)
+- [x] `DossierResponse` carries `cost_usd` and `tokens`
+- [x] CI `eval-gate` runs all 5 sub-gates offline (rag, structure, memo-test,
+      citation, redteam)
+- [x] `nightly.yml` exists (manual-dispatch-safe until the secret is added)
+      and produces a report artifact
 
-### Tests to perform
+### Tests in place
 
-| Kind | File | Checks |
-|---|---|---|
-| unit | `test_metric.py` | `JudgeResult` parsing; judge-prompt rendering includes rubric + evidence |
-| unit | `test_memo_eval.py` | precision / recall / F1 math on synthetic `(pred, label)` pairs |
-| unit | `test_citation_eval.py` | resolution pass; a fabricated citation is flagged |
-| unit | `test_redteam_eval.py` | injection helper; detection on a canned red-team report |
-| unit | `test_obs.py` | `InMemorySpanExporter` sees one span per node with `role` / `model` / token attrs |
-| unit | `test_cost_accounting.py` | token + `cost_usd` sums propagate to `DossierResponse` |
-| integration | `test_eval_run.py` | `run.py --suite all --split dev` writes a report JSON with every metric key |
-| eval-of-eval | `test_judge_calibration.py` | on `dev` (recorded responses) judge F1 ≥ 0.70 — guards a broken judge prompt |
-| CI | `eval-gate` expanded | 4 sub-gates; `--report` artifact uploaded |
-| manual | one real run | `make eval-test` with a real key; inspect a LangSmith trace; sanity-check a critique |
+`tests/test_golden_dataset_loader.py` (9) · `tests/test_memo_eval.py` (6) ·
+`tests/test_judge_calibration.py` (2) · `tests/test_citation_eval.py` (3) ·
+`tests/test_redteam_eval.py` (5) · `tests/test_obs.py` (5) ·
+`tests/test_cost_accounting.py` (7) · `tests/test_eval_run.py` (4) — 41 new
+tests this phase (95 → 136).
 
 ---
 

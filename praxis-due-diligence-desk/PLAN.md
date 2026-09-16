@@ -192,21 +192,31 @@ not attempted here.
   scope** here (see the phase's own scope-cuts note).
 - `.mcp.json` so it drops into Claude Code / Cursor. `mcp-contract` CI job.
 
-### Phase 4 — Eval framework (~1 week) — the portfolio centrepiece
-- `evals/datasets/golden_dossiers/` — 8–15 subjects, each with frozen `sources/`,
-  `expected.md`, an expert `label` (pass/fail) + `critique`; `index.yaml` splits
-  (`dev`, `test`, `online`).
-- `metric.py` — `BinaryLLMJudgeMetric` → `{label, critique}` structured output.
+### Phase 4 — Eval framework (~1 week) — the portfolio centrepiece — done, see `docs/IMPLEMENTATION_PLAN.md`
+- `evals/datasets/golden_dossiers/` — 8 subjects (not 8–15 — meets the
+  documented bar without ~2x the authoring cost), each with frozen
+  `sources/` + `memo.md` (dev/test) or sources only (online); `index.yaml`
+  carries the expert `label`/`critique`, splits `dev`/`test`/`online`. No
+  separate `expected.md` reference-memo mode — the expert label is the
+  ground truth the judge is scored against.
+- `metric.py` — `BinaryLLMJudgeMetric` → `{label, critique}`. Reads
+  `(subject, sources, memo)` — not reference-free re: the sources, since the
+  dataset's two deliberate fails are only catchable that way.
 - `memo_eval.py` — judge vs expert labels → precision / recall / **F1**
-  (okahu pattern, near-verbatim).
-- `citation_eval.py` — deterministic: every claim resolves; NLI claim↔span;
-  hallucinated-citation rate.
+  (okahu pattern, near-verbatim). `--split test` always offline (recorded
+  real verdicts via `FakeStructuredLLM.overrides`, not a VCR dependency);
+  `--split online` folds in what would have been a separate `online_eval.py`.
+- `citation_eval.py` — a fabricated-citation injection self-check + `--nli`
+  claim↔quote entailment (nightly, not gated).
 - `redteam_eval.py` — inject a known-false claim into evidence → detection rate.
-- `run.py --split {dev,test,online} [--gate]`; online eval generates fresh + judges.
-- OpenTelemetry spans on every node → LangSmith (or Phoenix). `PRAXIS_OTEL_ENABLED`.
-- **CI eval-gate**: fixed small slice, cheap model / recorded responses; fail PR if
-  `F1 < 0.75` or `faithfulness < 0.85` or `hallucinated_citation_rate > 0`.
-  Full eval runs nightly.
+- `run.py --suite {rag,structure,memo,citation,redteam,all} --split ... [--gate]`.
+- OpenTelemetry spans on every node, cost/token accounting on the LLM
+  instance. Console/OTLP export (`PRAXIS_OTEL_ENABLED`/`_ENDPOINT`) — no
+  direct LangSmith SDK integration (no key on this machine); any real
+  OTLP/HTTP collector works.
+- **CI eval-gate**: 5 sub-gates (rag, structure, memo-test, citation,
+  redteam), all offline/recorded. Full eval runs nightly
+  (`.github/workflows/nightly.yml`).
 
 ### Phase 5 — Deploy (~1 week)
 - Dockerfiles for `api`, `mcp`, `worker`, `frontend` (hardened: non-root,
