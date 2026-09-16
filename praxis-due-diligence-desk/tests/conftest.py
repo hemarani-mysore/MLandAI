@@ -7,6 +7,13 @@ from pathlib import Path
 os.environ.setdefault("PRAXIS_LLM_PROVIDER", "fake")
 os.environ.setdefault("PRAXIS_EMBEDDING_PROVIDER", "fake")
 os.environ.setdefault("PRAXIS_CHECKPOINT_DB_PATH", ":memory:")  # never touch a real file in tests
+# Same reasoning: most tests get their own isolated SQLite via the `db_session`
+# fixture below, but test_db_engine_real.py goes through the app's own
+# get_engine()/_database_url() directly — without this default it would fall
+# through to _database_url()'s own default (./praxis.db, a real file) outside
+# the postgres-contract CI job, which sets this explicitly to a real Postgres
+# URL and so overrides it.
+os.environ.setdefault("PRAXIS_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402

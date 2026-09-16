@@ -1,7 +1,8 @@
 .PHONY: install fmt lint type test check run api demo eval-rag eval-rag-gate \
         eval-structure eval-structure-gate eval-dev eval-test eval-test-gate \
         eval-citation eval-citation-gate eval-redteam eval-redteam-gate \
-        eval-online eval eval-gate eval-report clean
+        eval-online eval eval-gate eval-report db-upgrade db-check \
+        db-revision clean
 
 install:  ## Create .venv and install with dev extras
 	uv sync --extra dev
@@ -65,6 +66,15 @@ eval-gate:  ## Every suite's gate, fully offline (what CI's eval-gate job runs)
 
 eval-report:  ## Pretty-print the most recently written report
 	uv run python -c "import json,glob; p=sorted(glob.glob('evals/reports/*.json'))[-1]; print(p); print(json.dumps(json.load(open(p))['results'], indent=2, default=str))"
+
+db-upgrade:  ## Apply migrations to whatever PRAXIS_DATABASE_URL points at
+	uv run alembic upgrade head
+
+db-check:  ## Fail if the ORM models and the latest migration have drifted (used in CI)
+	uv run alembic check
+
+db-revision:  ## Autogenerate a new migration from model changes: make db-revision m="..."
+	uv run alembic revision --autogenerate -m "$(m)"
 
 check: lint type test eval-rag-gate eval-structure-gate eval-test-gate \
        eval-citation-gate eval-redteam-gate  ## Everything CI runs
