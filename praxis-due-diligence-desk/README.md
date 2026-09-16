@@ -222,10 +222,16 @@ evals/  rag_eval.py, memo_structure_eval.py, metric.py, memo_eval.py,       # 5 
         citation_eval.py, redteam_eval.py, run.py, datasets/, cassettes/
 deploy/ README.md                      # Phase 5
 docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
-.github/workflows/ci.yml               # quality (3.11/3.12) + eval-gate (5 gates) + mcp-contract
-.github/workflows/nightly.yml          # full eval suite, live model, report artifact
 .mcp.json                              # Claude Code / Cursor config for praxis-mcp
 ```
+
+CI lives at the **monorepo root**, one level up from this directory —
+`../.github/workflows/ci.yml` (`quality` × {3.11, 3.12} + a 5-gate `eval-gate`
++ `mcp-contract` + `postgres-contract`) and `../.github/workflows/nightly.yml`
+— not inside `praxis-due-diligence-desk/` itself, since GitHub Actions only
+discovers workflows at the true repository root. Both set
+`defaults.run.working-directory: praxis-due-diligence-desk` so every job step
+still runs from this project's own directory.
 
 ## Provenance
 

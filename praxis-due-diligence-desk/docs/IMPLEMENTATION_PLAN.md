@@ -397,10 +397,16 @@ researcher consume *external* MCP tools (web search, GitHub).
   `command: ["praxis", "mcp"]` and `PRAXIS_MCP_TRANSPORT=streamable-http` —
   the same one-Dockerfile-three-commands pattern `api`/`worker` already use,
   not a separate `docker/mcp.Dockerfile`.
-- `.github/workflows/ci.yml` — this file didn't actually exist before Phase 3
-  despite Phase 0/1 above marking a `quality`/`eval-gate` workflow as shipped;
-  building it now closes that gap as well as adding this phase's own
-  `mcp-contract` job (`quality` × {3.11, 3.12}, `eval-gate`, `mcp-contract`).
+- Added an `mcp-contract` job (`quality` × {3.11, 3.12}, `eval-gate`,
+  `mcp-contract`). **Correction, discovered in Phase 5 slice 1:** this claim
+  was wrong about *where* — I believed at the time that `ci.yml` didn't exist
+  before Phase 3 and built one, but I was only looking inside
+  `praxis-due-diligence-desk/`; the real workflow file (GitHub Actions only
+  reads `.github/workflows/` at the true monorepo root) already existed
+  since Phase 0. The file I built and edited through Phase 3/4 was a dead
+  duplicate GitHub never ran — `mcp-contract` (and Phase 4's eval-gate
+  expansion and nightly workflow) never actually executed until Phase 5
+  fixed this. See that phase's section for the full story.
 
 ### Scope cuts (and why)
 - **No GitHub MCP consumption.** Only the plan's concretely-specified
@@ -556,9 +562,13 @@ tracing + cost accounting; an expanded CI eval gate + a nightly full run.
       expected attributes (asserted via an in-memory span exporter)
 - [x] `DossierResponse` carries `cost_usd` and `tokens`
 - [x] CI `eval-gate` runs all 5 sub-gates offline (rag, structure, memo-test,
-      citation, redteam)
+      citation, redteam) — **the scripts were correct at the time, but the
+      workflow file they were added to was a dead duplicate GitHub Actions
+      never ran; not actually true until Phase 5 slice 1 fixed the file's
+      location. See that phase's section.**
 - [x] `nightly.yml` exists (manual-dispatch-safe until the secret is added)
-      and produces a report artifact
+      and produces a report artifact — **same correction: this file didn't
+      actually exist at a location GitHub could discover until Phase 5.**
 
 ### Tests in place
 
