@@ -129,5 +129,36 @@ jobs:
           tests/test_api_runs.py
           -v
 
-  # Phase 5 will add: docker build -> GHCR, kubeconform/kustomize validation,
-  # and a `kind` smoke test of deploy/k8s (slices 2-4).
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/hemarani-mysore/praxis
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v5
+        with:
+          # Not covered by `defaults.run.working-directory` — that only
+          # applies to `run:` steps, not action inputs like this one.
+          context: praxis-due-diligence-desk
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Image sanity check
+        run: docker run --rm "ghcr.io/hemarani-mysore/praxis:${{ github.sha }}" python -c "import praxis; print(praxis.__version__)"
+
+  # Phase 5 will also add: kubeconform/kustomize validation, and a `kind`
+  # smoke test of deploy/k8s (slices 3-4).

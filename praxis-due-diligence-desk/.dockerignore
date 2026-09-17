@@ -16,3 +16,7 @@ tests/
 docs/
 *.md
 !README.md
+*.db
+praxis_checkpoints.db
+htmlcov/
+.coverage

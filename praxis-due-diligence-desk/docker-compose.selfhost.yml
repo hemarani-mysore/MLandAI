@@ -1,30 +1,25 @@
-# Phase 2: API + Qdrant + Redis + an ingestion worker. Runs with the `fake` LLM
-# + hashing embedder (no keys).
-#   docker compose up --build
-#   curl -s localhost:8000/corpus/stats
+# One-command self-host: api + worker + mcp + qdrant + redis + postgres.
+# Starts with NO keys (fake LLM + hashing embedder) — set real provider env
+# vars to use a real model. Unlike docker-compose.yml (SQLite, dev-only),
+# this is the full production-shaped stack, migrations included.
+#
+#   docker compose -f docker-compose.selfhost.yml up --build
+#   curl -s localhost:8000/health
+#   curl -s localhost:8000/ready
 #   curl -s -XPOST localhost:8000/dossiers.md -d '{"subject":"Acme Robotics"}'
-#   curl -s -XPOST localhost:8000/corpus/jobs -d '{"text":"...", "title":"..."}'
 #
-# IMPORTANT: api and worker share a corpus only because both point at the same
-# PRAXIS_QDRANT_URL (a real Qdrant server, below) — they're separate processes,
-# so with the in-memory default each would have its own empty corpus (the same
-# gotcha as running `praxis ingest` then `praxis search` as two separate CLI
-# invocations).
-#
-# Phase 3 adds: `mcp`, the same image as api/worker (all three share one
-# Dockerfile — `mcp`/`langchain-mcp-adapters` are core deps already) running
-# `praxis.mcp` over streamable-http instead of stdio, so it's reachable as a
-# normal network service rather than a spawned subprocess.
-#   curl -s -XPOST localhost:8001/mcp -H 'content-type: application/json' \
-#     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-#
-# Phase 5 adds Postgres + Alembic migrations (see alembic/, PRAXIS_DATABASE_URL)
-# and k8s manifests (deploy/k8s/) — but not per-service Dockerfiles; api/worker/
-# mcp already share one image (above), and three near-identical Dockerfiles
-# would add maintenance burden with no real benefit at this scale. This file
-# stays SQLite + dev-only; docker-compose.selfhost.yml is the one-command,
-# zero-keys stack with Postgres too.
+# PRODUCTION.md covers the managed-service equivalent (Neon/Qdrant Cloud/
+# Upstash) for an actual deploy — this file self-hosts every dependency.
 services:
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      PRAXIS_DATABASE_URL: postgresql+asyncpg://praxis:praxis@postgres:5432/praxis
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     ports:
@@ -34,6 +29,7 @@ services:
       PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
       PRAXIS_QDRANT_URL: http://qdrant:6333
       PRAXIS_REDIS_URL: redis://redis:6379
+      PRAXIS_DATABASE_URL: postgresql+asyncpg://praxis:praxis@postgres:5432/praxis
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
@@ -42,6 +38,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 30s
@@ -56,6 +54,7 @@ services:
       PRAXIS_EMBEDDING_PROVIDER: ${PRAXIS_EMBEDDING_PROVIDER:-fake}
       PRAXIS_QDRANT_URL: http://qdrant:6333
       PRAXIS_REDIS_URL: redis://redis:6379
+      PRAXIS_DATABASE_URL: postgresql+asyncpg://praxis:praxis@postgres:5432/praxis
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
@@ -64,6 +63,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     deploy:
       replicas: 1  # the ingestion queue isn't sharded yet — one replica only
 
@@ -85,8 +86,8 @@ services:
     depends_on:
       qdrant:
         condition: service_started
-    # Own in-memory corpus/DB unless PRAXIS_QDRANT_URL/PRAXIS_DATABASE_URL
-    # point at the same real backends api/worker use — same caveat as the CLI.
+    # Own in-memory corpus unless PRAXIS_QDRANT_URL points at the same real
+    # backend api/worker use — same caveat as the CLI (see docker-compose.yml).
 
   redis:
     image: redis:7-alpine
@@ -100,5 +101,22 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: praxis
+      POSTGRES_PASSWORD: praxis
+      POSTGRES_DB: praxis
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praxis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   qdrant_data:
+  postgres_data:

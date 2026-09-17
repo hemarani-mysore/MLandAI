@@ -1,4 +1,5 @@
-# Praxis API — FastAPI + LangGraph. Multi-stage, non-root, slim.
+# Praxis — FastAPI + LangGraph. Multi-stage, non-root, slim. One image, three
+# roles (api/worker/mcp) selected by command override — see docker-compose.yml.
 FROM python:3.12-slim AS build
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -6,8 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY src ./src
+# Not part of the installed package (hatchling only builds src/praxis) — a
+# companion directory needed at runtime to run `alembic upgrade head` inside
+# the container (see docker-compose.selfhost.yml's api entrypoint).
+COPY alembic ./alembic
 RUN pip install --no-cache-dir .
 
 FROM python:3.12-slim AS runtime
