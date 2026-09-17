@@ -177,4 +177,54 @@ jobs:
       - name: Validate prod overlay
         run: kustomize build deploy/k8s/overlays/prod | kubeconform -strict -summary
 
-  # Phase 5 will also add: a `kind` smoke test of deploy/k8s (slice 4).
+  kind-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (local only — same tag deploy/k8s/base's manifests reference)
+        uses: docker/build-push-action@v5
+        with:
+          context: praxis-due-diligence-desk
+          push: false
+          load: true
+          tags: ghcr.io/hemarani-mysore/praxis:latest
+      - name: Install kustomize
+        run: |
+          curl -sL -o /tmp/kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+          sudo tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: praxis-smoke
+      - name: Load the local image into kind
+        # Every container in base/ sets imagePullPolicy: IfNotPresent
+        # specifically so this loaded image is used instead of kubelet trying
+        # (and failing) to pull `:latest` fresh from GHCR.
+        run: kind load docker-image ghcr.io/hemarani-mysore/praxis:latest --name praxis-smoke
+      - name: Deploy the dev overlay
+        run: kustomize build deploy/k8s/overlays/dev | kubectl apply -f -
+      - name: Wait for the datastores first, then the app deployments
+        run: |
+          kubectl -n praxis rollout status statefulset/qdrant --timeout=120s
+          kubectl -n praxis rollout status deployment/redis --timeout=60s
+          kubectl -n praxis rollout status deployment/api --timeout=180s
+          kubectl -n praxis rollout status deployment/worker --timeout=120s
+          kubectl -n praxis rollout status deployment/mcp --timeout=120s
+      - name: Smoke test over a port-forward (fake provider — zero cost, zero external calls)
+        run: |
+          kubectl -n praxis port-forward svc/api 8000:8000 &
+          for i in $(seq 1 15); do curl -sf localhost:8000/health && break; sleep 2; done
+          curl -sf localhost:8000/health
+          curl -sf localhost:8000/ready
+          curl -sf -X POST localhost:8000/dossiers \
+            -H 'content-type: application/json' \
+            -d '{"subject":"Acme Robotics"}'
+      - name: NetworkPolicy — an unrelated pod cannot reach qdrant
+        run: |
+          kubectl -n praxis run debug --image=busybox:1.36 --restart=Never --command -- sleep 300
+          kubectl -n praxis wait --for=condition=Ready pod/debug --timeout=60s
+          kubectl -n praxis exec debug -- timeout 5 nc -zv qdrant 6333 && exit 1 || echo "correctly blocked"
+      - name: NetworkPolicy — the api pod (an allowed label) can reach qdrant
+        run: >
+          kubectl -n praxis exec deploy/api --
+          python -c "import socket; s = socket.create_connection(('qdrant', 6333), timeout=5); print('connected'); s.close()"

@@ -27,6 +27,7 @@ spec:
       initContainers:
         - name: migrate
           image: ghcr.io/hemarani-mysore/praxis:latest
+          imagePullPolicy: IfNotPresent
           command: ["alembic", "upgrade", "head"]
           envFrom:
             - configMapRef:
@@ -49,6 +50,7 @@ spec:
       containers:
         - name: api
           image: ghcr.io/hemarani-mysore/praxis:latest
+          imagePullPolicy: IfNotPresent
           command: ["uvicorn", "praxis.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
           ports:
             - containerPort: 8000

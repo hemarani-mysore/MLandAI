@@ -27,6 +27,7 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/hemarani-mysore/praxis:latest
+          imagePullPolicy: IfNotPresent
           command: ["arq", "praxis.worker.WorkerSettings"]
           envFrom:
             - configMapRef:

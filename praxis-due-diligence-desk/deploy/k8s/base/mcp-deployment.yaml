@@ -27,6 +27,7 @@ spec:
       containers:
         - name: mcp
           image: ghcr.io/hemarani-mysore/praxis:latest
+          imagePullPolicy: IfNotPresent
           command: ["praxis", "mcp"]
           ports:
             - containerPort: 8001
