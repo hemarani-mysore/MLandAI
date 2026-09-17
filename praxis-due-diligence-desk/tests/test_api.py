@@ -10,7 +10,38 @@ def test_health():
 def test_ready_reports_corpus(client):
     body = client.get("/ready").json()
     assert body["ok"] is True
-    assert body["corpus"]["chunks"] == 0
+    assert body["qdrant"]["ok"] is True
+    assert body["qdrant"]["chunks"] == 0
+
+
+def test_ready_checks_the_database_for_real(client):
+    body = client.get("/ready").json()
+    assert body["database"] == {"ok": True}
+
+
+def test_ready_skips_the_llm_client_on_the_fake_provider(client):
+    # PRAXIS_LLM_PROVIDER=fake by default in tests (conftest.py) — no client
+    # is constructed at all, so there's nothing to fail.
+    body = client.get("/ready").json()
+    assert body["llm"] == {"ok": True, "provider": "fake"}
+
+
+def test_ready_reports_a_real_providers_construction_failure(client, monkeypatch):
+    # A real provider with no credentials fails at client-construction time
+    # (confirmed in Phase 4 for OpenAI) — /ready must catch that and report
+    # it, not 500.
+    monkeypatch.setenv("PRAXIS_LLM_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from praxis.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        body = client.get("/ready").json()
+        assert body["ok"] is False
+        assert body["llm"]["ok"] is False
+        assert body["llm"]["provider"] == "openai"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_create_dossier_returns_full_response(client):

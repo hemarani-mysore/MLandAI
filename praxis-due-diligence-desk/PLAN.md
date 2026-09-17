@@ -218,17 +218,29 @@ not attempted here.
   redteam), all offline/recorded. Full eval runs nightly
   (`.github/workflows/nightly.yml`).
 
-### Phase 5 — Deploy (~1 week)
-- Dockerfiles for `api`, `mcp`, `worker`, `frontend` (hardened: non-root,
-  `readOnlyRootFilesystem`, dropped caps).
-- `deploy/k8s/base` + `overlays/{dev,prod}` (kustomize) or a Helm chart:
-  Deployments, Services, Ingress, HPA on `api`, PDB, NetworkPolicy (only
-  `api`/`worker` reach the datastores), ConfigMap, `secrets.example.yaml`.
-- CI: `kubeconform` + `kustomize build` + `helm lint`; then `kind` — apply
-  `overlays/dev`, wait for rollout, `curl /health` on every service.
-- CI deploy on `main`: `flyctl deploy` for `api` + `mcp` + `frontend`;
-  Qdrant Cloud + Neon Postgres free tiers. `/ready` checks both + one LLM ping.
-- `ARCHITECTURE.md`, `RUNBOOK.md`, `PRODUCTION.md`.
+### Phase 5 — Deploy (~1 week) — done, see `docs/IMPLEMENTATION_PLAN.md`
+- One shared Dockerfile for `api`/`mcp`/`worker` (not per-service — continuing
+  the Phase 3 decision; no frontend was ever built, so no `frontend`
+  Dockerfile/Fly config/k8s manifests either). Non-root, `readOnlyRootFilesystem`,
+  dropped caps, `/data`+`/tmp` emptyDirs.
+- `deploy/k8s/base` + `overlays/{dev,prod}` (kustomize): Deployments, Services,
+  Ingress, HPA on `api`, PDB, NetworkPolicy (`api`/`worker`/`mcp` reach Qdrant,
+  `api`/`worker` reach Redis), ConfigMap, `secrets.example.yaml`.
+- CI: `kubeconform` + `kustomize build` (`k8s-validate`); then a real `kind`
+  cluster (`kind-smoke`) — apply `overlays/dev`, wait for rollout, a live
+  `/health`/`/ready`/`POST /dossiers` smoke test, NetworkPolicy proven both ways.
+- CI deploy job exists, gated on `main` + a `FLY_API_TOKEN` secret that
+  doesn't exist yet — deploy-ready, not deployed (no Fly/managed-service
+  account on this machine); `PRODUCTION.md` has the exact steps. `/ready`
+  checks Qdrant + the database for real + confirms the LLM client
+  constructs (not a live call on every probe — real cost for no real safety).
+- `docs/ARCHITECTURE.md`, `docs/RUNBOOK.md`, `PRODUCTION.md` — all written.
+- Postgres + Alembic migrations (not originally itemized here, but part of
+  "production-shaped" — `alembic/`, a real `postgres:16` CI job).
+- **Found and fixed a real bug this phase:** GitHub Actions workflows must
+  live at the true monorepo root, not inside `praxis-due-diligence-desk/` —
+  three phases of CI jobs (Phase 3's `mcp-contract`, Phase 4's eval-gate
+  expansion + `nightly.yml`) had silently never run until this was caught.
 
 ### Phase 6 — Polish (~3 days)
 Demo video · dev.to writeup · cost & latency notes from OTel · `verify.sh` that

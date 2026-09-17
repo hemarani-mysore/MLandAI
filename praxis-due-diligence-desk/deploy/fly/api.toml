@@ -1,0 +1,33 @@
+# Deploy from praxis-due-diligence-desk/ so the Dockerfile path resolves:
+#   fly launch --config deploy/fly/api.toml --dockerfile Dockerfile --no-deploy
+#   fly secrets set -a praxis-api OPENAI_API_KEY=... PRAXIS_DATABASE_URL=...  # see PRODUCTION.md
+#   fly deploy --config deploy/fly/api.toml --dockerfile Dockerfile
+app = "praxis-api"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PRAXIS_LLM_PROVIDER = "openai"
+  PRAXIS_EMBEDDING_PROVIDER = "openai"
+  # PRAXIS_QDRANT_URL / PRAXIS_REDIS_URL / PRAXIS_DATABASE_URL / the provider
+  # API keys are secrets, not plain env vars — `fly secrets set` (see above).
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    path = "/health"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+    method = "get"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

@@ -22,7 +22,7 @@ CI, Docker/Kubernetes — in one coherent project.
 | **2 — Multi-agent** | real prompts + multi-section editor + deterministic recommendation; researcher fan-out via `Send`; async graph end to end; run persistence + checkpointing; SSE streaming + ingestion worker | ✅ **done** |
 | **3 — MCP** | `praxis-mcp` FastMCP server (4 tools, 3 resources, 2 prompts); researcher falls back to an external `web_search` MCP tool when the corpus has nothing; CI (`quality` × 2 Python versions, `eval-gate`, `mcp-contract`) | ✅ **done** |
 | **4 — Eval framework** | golden-dossier dataset (8 subjects, 2 deliberate fails) + LLM-as-judge (F1 vs expert labels, judge sees the sources, not just the memo); citation-integrity injection + NLI checks; seeded-error detection; OTel tracing + cost/token accounting; `evals/run.py` orchestrator; CI `eval-gate` (5 sub-gates) + a nightly full-suite workflow | ✅ **done** |
-| 5 — Deploy | per-service Dockerfiles, k8s manifests validated on `kind` in CI, live URL on Fly | ⬜ |
+| **5 — Deploy** | Postgres + Alembic migrations; one shared Docker image pushed to GHCR in CI; Kubernetes manifests validated on a real ephemeral `kind` cluster in CI (full rollout, live smoke test, NetworkPolicy proven both ways); Fly deploy job gated on a secret that doesn't exist yet — deploy-ready, not deployed (`PRODUCTION.md`) | ✅ **done** |
 
 ## Quickstart
 
@@ -215,23 +215,51 @@ src/praxis/
   mcp/    server.py __main__.py         # praxis-mcp — tools/resources/prompts over the same library code
   tools/  mcp_tools.py                  # load_external_tools() — the researcher's web-search fallback
   obs/    __init__.py                 # real OTel setup_tracing() + span()
-tests/                                 # 136 tests: graph, fan-out, async, checkpointing, db, api runs, sse,
-                                        #   jobs, worker, retrieval, cli, schemas, mcp, evals (judge/citation/
-                                        #   redteam/obs/cost), golden-dataset loader
+tests/                                 # 142 tests: graph, fan-out, async, checkpointing, db (incl. a real-
+                                        #   Postgres round trip), api runs, sse, jobs, worker, retrieval, cli,
+                                        #   schemas, mcp, evals (judge/citation/redteam/obs/cost), golden-dataset
+                                        #   loader, /ready's deep-check paths
 evals/  rag_eval.py, memo_structure_eval.py, metric.py, memo_eval.py,       # 5 gates (CI) + run.py orchestrator
         citation_eval.py, redteam_eval.py, run.py, datasets/, cassettes/
-deploy/ README.md                      # Phase 5
-docs/   IMPLEMENTATION_PLAN.md         # per-phase steps + acceptance criteria + tests
+alembic/                               # migrations — praxis.db.models.Base is the source of truth
+deploy/ README.md fly/{api,mcp}.toml   # k8s/{base,overlays/{dev,prod}} — see "## Deploy" below
+docs/   IMPLEMENTATION_PLAN.md ARCHITECTURE.md RUNBOOK.md   # + PRODUCTION.md at the project root
 .mcp.json                              # Claude Code / Cursor config for praxis-mcp
 ```
 
 CI lives at the **monorepo root**, one level up from this directory —
-`../.github/workflows/ci.yml` (`quality` × {3.11, 3.12} + a 5-gate `eval-gate`
-+ `mcp-contract` + `postgres-contract`) and `../.github/workflows/nightly.yml`
-— not inside `praxis-due-diligence-desk/` itself, since GitHub Actions only
-discovers workflows at the true repository root. Both set
+`../.github/workflows/ci.yml` (`quality` × {3.11, 3.12}, a 5-gate `eval-gate`,
+`mcp-contract`, `postgres-contract`, `build`, `k8s-validate`, `kind-smoke`,
+`deploy`) and `../.github/workflows/nightly.yml` — not inside
+`praxis-due-diligence-desk/` itself, since GitHub Actions only discovers
+workflows at the true repository root (a real mistake, found and fixed in
+Phase 5 — see `docs/IMPLEMENTATION_PLAN.md`). Both set
 `defaults.run.working-directory: praxis-due-diligence-desk` so every job step
 still runs from this project's own directory.
+
+## Deploy
+
+```bash
+docker compose -f docker-compose.selfhost.yml up --build   # api+worker+mcp+qdrant+redis+postgres, zero keys
+kubectl apply -k deploy/k8s/overlays/dev                    # or overlays/prod, against a real cluster
+```
+
+One shared image (`ghcr.io/hemarani-mysore/praxis`, pushed on every push to
+this branch) runs all three roles by command override. Kubernetes manifests
+(`deploy/k8s/`, kustomize) are validated with `kubeconform -strict` and
+applied to a real ephemeral `kind` cluster in CI — full rollout, a live
+`/health`/`/ready`/`POST /dossiers` smoke test, and a NetworkPolicy proven
+both ways (an unrelated pod refused, an `api`-labelled one succeeds), not
+just reviewed YAML. `/ready` does an actual deep check: Qdrant, the database
+(`SELECT 1`), and that the LLM client constructs from the configured
+credentials.
+
+No live URL — no Fly or managed-service account exists on the machine this
+was built on. The CI `deploy` job (gated on `main` + a `FLY_API_TOKEN`
+secret) and `PRODUCTION.md`'s step-by-step signup + `fly deploy` runbook are
+both ready for whenever that changes. See `docs/ARCHITECTURE.md` for the
+full system diagram and `docs/RUNBOOK.md` for day-2 operations (redeploy,
+rollback, reindex, scale, rotate keys).
 
 ## Provenance
 

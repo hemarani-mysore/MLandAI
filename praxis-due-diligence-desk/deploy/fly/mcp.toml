@@ -1,0 +1,31 @@
+# Same image as api.toml, different command (see the shared root Dockerfile /
+# docker-compose.yml — one image, three roles by command override).
+#   fly launch --config deploy/fly/mcp.toml --dockerfile Dockerfile --no-deploy
+#   fly secrets set -a praxis-mcp OPENAI_API_KEY=... PRAXIS_DATABASE_URL=...
+#   fly deploy --config deploy/fly/mcp.toml --dockerfile Dockerfile
+app = "praxis-mcp"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PRAXIS_LLM_PROVIDER = "openai"
+  PRAXIS_EMBEDDING_PROVIDER = "openai"
+  PRAXIS_MCP_TRANSPORT = "streamable-http"
+  PRAXIS_MCP_HOST = "0.0.0.0"
+  PRAXIS_MCP_PORT = "8001"
+
+[processes]
+  app = "praxis mcp"
+
+[http_service]
+  internal_port = 8001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

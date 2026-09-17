@@ -228,3 +228,36 @@ jobs:
         run: >
           kubectl -n praxis exec deploy/api --
           python -c "import socket; s = socket.create_connection(('qdrant', 6333), timeout=5); print('connected'); s.close()"
+
+  deploy:
+    runs-on: ubuntu-latest
+    # Deploy-ready, not deployed: this branch's own push trigger never
+    # matches `main`, so this job is a guaranteed no-op for as long as this
+    # branch exists on its own — genuinely live only after a merge to `main`
+    # *and* FLY_API_TOKEN being added as a repo secret (checked below too, so
+    # it also skips cleanly on `main` before that secret exists).
+    if: github.ref == 'refs/heads/main'
+    needs: [quality, eval-gate, build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for FLY_API_TOKEN
+        id: has_token
+        run: |
+          if [ -z "${{ secrets.FLY_API_TOKEN }}" ]; then
+            echo "FLY_API_TOKEN is not set as a repo secret yet — skipping deploy." >&2
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.has_token.outputs.present == 'true'
+      - name: Deploy api
+        if: steps.has_token.outputs.present == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config deploy/fly/api.toml --dockerfile Dockerfile --remote-only
+      - name: Deploy mcp
+        if: steps.has_token.outputs.present == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config deploy/fly/mcp.toml --dockerfile Dockerfile --remote-only

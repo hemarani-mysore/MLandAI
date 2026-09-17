@@ -580,82 +580,133 @@ tests this phase (95 → 136).
 
 ---
 
-## Phase 5 — Deploy  ·  ⬜  (~1 week)
+## Phase 5 — Deploy  ·  ✅ done
 
-**Goal:** per-service images, Kubernetes manifests validated on an ephemeral
-`kind` cluster in CI, a live URL on Fly, CI/CD to GHCR + Fly.
+**Goal:** container images, Kubernetes manifests validated on an ephemeral
+`kind` cluster in CI, Postgres + migrations, a deploy-ready path to a live
+URL on Fly, CI/CD to GHCR.
 
-### Steps
+### A real bug found and fixed this phase, not a feature
 
-1. **Images** — `docker/{api,worker,mcp}.Dockerfile`
-   - Shared base stage; hardened: non-root uid, `readOnlyRootFilesystem`-friendly,
-     `--no-cache`, slim or distroless.
-   - `.dockerignore` per build context.
+GitHub Actions only discovers workflow files at the **true monorepo root**
+(`.github/workflows/`), never inside a project subdirectory. Every session
+working on this branch — including mine, across Phase 3 (`mcp-contract`),
+Phase 4 (the eval-gate expansion, `nightly.yml`), and the start of this
+phase (`postgres-contract`) — had been `cd`'d into
+`praxis-due-diligence-desk/` and editing `.github/workflows/ci.yml` *inside
+that subdirectory*, a file GitHub Actions has never once read. A real,
+correctly-placed `ci.yml` already existed at the true root since Phase 0
+(last touched Phase 2: `quality` + a 2-gate `eval-gate` only) — three phases
+of "the eval-gate now also runs X" claims went into a dead duplicate and
+never actually executed. Undetectable until `gh` CLI was installed this
+phase (no Homebrew, no Docker on this machine either — same static-binary
+approach for `gh`, `kustomize`, and `kubeconform`, all installed and used to
+verify locally before ever pushing). Fixed: both workflow files now live at
+the true root with `defaults.run.working-directory: praxis-due-diligence-desk`;
+every job built since Phase 3 was merged in and reverified with a real push +
+`gh run watch`. Every acceptance criterion below was independently
+reconfirmed against the real CI run, not assumed from the fix alone.
 
-2. **Compose** — `docker-compose.yml` (dev) + `docker-compose.selfhost.yml`
-   (one command: api + worker + mcp + qdrant + redis + postgres, healthchecks,
-   `PRAXIS_LLM_PROVIDER=fake` default so it works with zero keys).
+### What shipped (5 slices + the CI-location fix, each verified independently)
 
-3. **`deploy/k8s/base/`** (kustomize)
-   - `namespace`, `configmap`, `secret.example.yaml`
-   - `api-{deployment,service,hpa,pdb}.yaml` — HPA CPU 70%, 2→10
-   - `worker-deployment.yaml` — `replicas: 1` (comment: the queue isn't sharded yet)
-   - `mcp-{deployment,service}.yaml`
-   - `qdrant-statefulset.yaml` + PVC (or external Qdrant Cloud via secret)
-   - `ingress.yaml` (nginx) — api + mcp hosts
-   - `networkpolicy.yaml` — only `api` / `worker` → datastores
-   - `serviceaccount.yaml`, `kustomization.yaml`
+1. **Postgres + Alembic** — `alembic/` (async template, wired to
+   `praxis.db.models.Base.metadata` and the app's own `_database_url()`), one
+   initial migration matching `DossierRun`/`RunEvent`. New CI job
+   `postgres-contract`: a real `postgres:16` GitHub Actions service
+   container — no Postgres exists locally, so this is the actual
+   verification, not a URL-string check. `Base.metadata.create_all()` stays
+   as `ensure_schema()`'s SQLite-dev fallback.
+2. **Docker image + self-host compose** — `docker-compose.selfhost.yml`
+   (api+worker+mcp+qdrant+redis+postgres, a `migrate` one-shot service,
+   zero keys needed). New CI job `build`: pushes a real, working
+   `ghcr.io/hemarani-mysore/praxis` image (one shared image, not
+   per-service Dockerfiles — continuing the Phase 3 decision), tagged by
+   sha always and `:latest` on `main` only, verified by a sanity step that
+   pulls the just-pushed image back down and runs it.
+3. **Kubernetes manifests** (`deploy/k8s/`, kustomize base + dev/prod
+   overlays) — api (Deployment+Service+HPA 70%/2→10+PDB, an `alembic
+   upgrade head` initContainer), worker, mcp, a Qdrant StatefulSet+PVC, a
+   dev-overlay-only self-hosted Redis, NetworkPolicy (Qdrant reachable from
+   api/worker/mcp; Redis from api/worker only), Ingress. Every praxis-owned
+   container: non-root uid 10001, `readOnlyRootFilesystem`, dropped
+   capabilities, `/data` + `/tmp` emptyDirs (both needed under a read-only
+   root — reasoned through and added proactively, not discovered by a
+   crash-looping pod). New CI job `k8s-validate`
+   (`kustomize build | kubeconform -strict`, both overlays) — also run and
+   fixed locally first (installed `kustomize`/`kubeconform` as static
+   binaries) before ever pushing.
+4. **`kind-smoke`** — a genuinely real, ephemeral Kubernetes cluster inside
+   the CI runner (`helm/kind-action`): the dev overlay's full rollout
+   (datastores first, then the app), a live `/health`/`/ready`/
+   `POST /dossiers` smoke test over a real port-forward, and the
+   NetworkPolicy proven both ways — an unrelated `busybox` pod refused, an
+   `api`-labelled one succeeds. Passed on the first real run.
+5. **Fly scaffolding, `/ready` deep-check, docs** — `deploy/fly/{api,mcp}.toml`
+   (no `frontend.toml` — no frontend was ever built); CI `deploy` job gated
+   on `main` + `secrets.FLY_API_TOKEN` (mirrors `nightly.yml`'s secret-guard
+   pattern) — a real no-op today, verifiable-when-live once the user adds
+   the account/secret (`PRODUCTION.md`). `/ready` now does an actual deep
+   check — Qdrant (`corpus.stats()` already makes a real vector-store call),
+   the database (`SELECT 1`), and the LLM client — each reporting its own
+   `ok`/error. `PRODUCTION.md`, `docs/ARCHITECTURE.md`, `docs/RUNBOOK.md`
+   (new), `deploy/README.md` rewritten to match reality.
 
-4. **`deploy/k8s/overlays/{dev,prod}/`**
-   - `dev` — kind-friendly: NodePort, in-cluster qdrant, `fake` provider
-   - `prod` — real ingress host, external secrets, real provider
+### Deviations from this doc's original wording (confirmed with the user before building)
 
-5. **CI additions**
-   - `build` job — `docker buildx` each image → `ghcr.io/hemarani-mysore/praxis-{api,worker,mcp}:<sha>` (+ `:latest` on `main`); needs `permissions: packages: write`
-   - `k8s-validate` job — `kubeconform -strict` on `kustomize build overlays/{dev,prod}`
-   - `kind-smoke` job — `helm/kind-action` → `kubectl apply -k overlays/dev` →
-     `kubectl rollout status` all deployments → port-forward →
-     `curl /health` + `/ready` + one `POST /dossiers` → teardown
-   - `deploy` job (`main` only, `environment: production`) — `flyctl deploy` for
-     `api` + `mcp` from `deploy/fly/{api,mcp}.toml`
-
-6. **Fly / managed services** (manual, documented in `PRODUCTION.md`)
-   - `fly launch` api + mcp; `fly secrets set` `OPENAI_API_KEY`,
-     `PRAXIS_QDRANT_URL` (Qdrant Cloud free), `PRAXIS_DATABASE_URL` (Neon free),
-     `REDIS_URL` (Upstash free), `LANGSMITH_API_KEY`
-   - `/ready` deep check: Qdrant + Postgres reachable + one tiny LLM ping
-     (skipped when `fake`)
-
-7. **Docs** — expand `deploy/README.md`; add `PRODUCTION.md` (Fly + self-host
-   runbook), `docs/ARCHITECTURE.md`, `docs/RUNBOOK.md` (redeploy, rollback,
-   reindex corpus, scale, rotate keys).
+- **Live Fly deployment: deploy-ready, not deployed.** No Fly account exists
+  on this machine and creating one isn't something to do on the user's
+  behalf; `PRODUCTION.md` has the exact steps. The "live URL" acceptance
+  criterion is trimmed to "the `deploy` job exists and is correctly gated."
+- **Managed services (Qdrant Cloud/Neon/Upstash): scaffolded, not signed
+  up for.** The `prod` overlay and Fly config read them from
+  secrets/configmap with documented setup steps; `kind-smoke` (what CI
+  *actually* proves) exercises the `dev` overlay's self-hosted equivalents
+  instead.
+- **One shared Dockerfile, not `docker/{api,worker,mcp}.Dockerfile`** —
+  continuing the Phase 3 decision; three near-identical Dockerfiles would
+  add maintenance burden with no real benefit at this scale.
+- **The "LLM ping" in `/ready` constructs the client rather than making a
+  live generation call** — a real call on every 10-15s k8s/Fly probe would
+  spend real tokens for no real extra safety; constructing the client
+  already runs the same credential validation a live call would (confirmed
+  for OpenAI in Phase 4: a bad key raises at construction).
+- **`/ready`'s database check always runs `SELECT 1`**, not only when
+  `PRAXIS_DATABASE_URL` isn't the SQLite default — strictly more thorough
+  at no added complexity.
+- **A known, documented gap, not silently glossed over:** Qdrant Cloud
+  needs an API key `QdrantVectorStore` doesn't currently forward — noted in
+  `PRODUCTION.md` as a real thing to fix before actually pointing at Qdrant
+  Cloud, since it was never built or tested against an authenticated Qdrant.
 
 ### Acceptance criteria
 
-- [ ] `docker compose -f docker-compose.selfhost.yml up` → every service healthy;
-      `curl localhost:8000/dossiers.md` works with **no keys**
-- [ ] `kubeconform -strict` passes on `kustomize build overlays/{dev,prod}`
-- [ ] CI `kind-smoke`: all deployments reach `Ready`; `/health` + `/ready` 200; a
-      dossier `POST` returns 200
-- [ ] `ghcr.io/hemarani-mysore/praxis-api:<sha>` pushed on every `main` build
-- [ ] Live: `https://praxis-api.fly.dev/health` → `{"ok": true}`; `/ready` green;
-      a real dossier request succeeds
-- [ ] `NetworkPolicy` verified — a debug pod outside `api`/`worker` cannot reach
-      Qdrant (tested in kind)
-- [ ] Rollback tested once (`flyctl releases` → redeploy previous image)
-- [ ] `kubectl get hpa` shows the api HPA with targets
+- [x] `docker-compose.selfhost.yml` written (api+worker+mcp+qdrant+redis+
+      postgres, zero keys) — not run locally (no Docker on this machine);
+      the `build`/`kind-smoke` CI jobs are the real verification of the
+      shared image this compose file also uses
+- [x] `kubeconform -strict` passes on `kustomize build overlays/{dev,prod}` —
+      verified both locally and in CI's `k8s-validate` job
+- [x] CI `kind-smoke`: all deployments reach `Ready`; `/health` + `/ready`
+      200; a dossier `POST` returns 200 — passed first run
+- [x] `ghcr.io/hemarani-mysore/praxis:<sha>` pushed on every push to this
+      branch (not gated to `main` — verified directly, `:latest` is the one
+      reserved for `main`)
+- [ ] Live Fly URL — deploy-ready per the confirmed deviation above, not
+      deployed; see `PRODUCTION.md`
+- [x] `NetworkPolicy` verified — a debug pod outside `api`/`worker`/`mcp`
+      cannot reach Qdrant; a pod matching those labels can (tested in `kind`)
+- [ ] Rollback tested once — not applicable without a live deployment;
+      `docs/RUNBOOK.md` documents the exact commands for whenever one exists
+- [x] `kubectl get hpa` shows the api HPA with 70%/2→10 targets (`api-hpa.yaml`)
 
-### Tests to perform
+### Tests in place
 
-| Kind | What | How |
-|---|---|---|
-| image sanity | `docker run --rm praxis-api python -c "import praxis"` | in `build` job |
-| image sanity | `docker run praxis-api` then `curl /health` | ephemeral container in CI |
-| manifest | `kubeconform -strict`, `kustomize build`, (`helm lint`) | `k8s-validate` job |
-| smoke | rollout + `/health` + `/ready` + `POST /dossiers` | `kind-smoke` job |
-| netpol | debug pod → `nc qdrant 6333` should **fail**; from `api` should succeed | `kind-smoke` job step |
-| security | `trivy image` / `docker scout` (warn, non-gating); `verify.sh` proves non-root + ro-fs | CI + manual |
-| manual | hit the live URL: `make demo` against it, watch Fly logs, run a load loop and watch `kubectl get hpa` scale | by hand post-deploy |
+`tests/test_db_url.py` (2) · `tests/test_db_engine_real.py` (1, the one that
+genuinely round-trips through real Postgres in `postgres-contract`) ·
+`tests/test_api.py` (+3: `/ready`'s qdrant/database/llm checks, including
+the real-provider-with-no-key failure path) · CI jobs `postgres-contract`,
+`build`, `k8s-validate`, `kind-smoke`, `deploy` (all passing except `deploy`,
+correctly a no-op).
 
 ---
 
@@ -757,6 +808,7 @@ praxis mcp          # run the MCP stdio server
 | `quality` (3.11, 3.12) | push / PR | yes | 0 |
 | `eval-gate` | push / PR | yes | 1 (expanded in 4) |
 | `mcp-contract` | push / PR | yes | 3 |
+| `postgres-contract` (real `postgres:16` service container) | push / PR | yes | 5 |
 | `build` → GHCR | push | no (main: publishes) | 5 |
 | `k8s-validate` | push / PR | yes | 5 |
 | `kind-smoke` | push / PR | yes | 5 |

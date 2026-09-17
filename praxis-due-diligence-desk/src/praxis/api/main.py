@@ -29,6 +29,7 @@ from praxis.config import get_settings
 from praxis.db import DossierRun, RunEvent
 from praxis.graph import arun_dossier
 from praxis.graph.checkpoint import open_checkpointer
+from praxis.llm import get_llm
 from praxis.obs import setup_tracing
 from praxis.rag import Corpus, RetrievedChunk, ingest_source
 from praxis.rag.models import CorpusStats, IngestResult
@@ -100,14 +101,49 @@ def health() -> dict:
 
 
 @app.get("/ready")
-def ready(corpus: Corpus = Depends(corpus_dep)) -> dict:
+async def ready(
+    corpus: Corpus = Depends(corpus_dep),
+    session: AsyncSession = Depends(db_session_dep),
+) -> dict:
+    """Deep readiness check — Qdrant, the database, and the LLM client, each
+    reporting its own ok/error rather than folding into one opaque boolean
+    (so a probe failure is diagnosable from the response alone).
+
+    The "LLM" check constructs the client (`get_llm()`) rather than making a
+    real generation call: building a real provider's client already runs the
+    same credential validation a live call would (confirmed for OpenAI in
+    Phase 4 — a missing/malformed key raises at construction, before any
+    network request), and Kubernetes/Fly hit this endpoint every 10-15s —
+    spending real tokens on every probe would be a genuine waste, not extra
+    safety. Skipped entirely on the fake provider, which needs no client at
+    all. Qdrant's check reuses `corpus.stats()`, which already makes a real
+    call to the vector store (`count()`) when backed by a server, not just
+    local bookkeeping.
+    """
     s = get_settings()
-    return {
-        "ok": True,
-        "llm_provider": s.llm_provider,
-        "embedding_provider": s.embedding_provider,
-        "corpus": corpus.stats().model_dump(),
-    }
+    checks: dict[str, dict] = {}
+
+    try:
+        checks["qdrant"] = {"ok": True, **corpus.stats().model_dump()}
+    except Exception as exc:  # noqa: BLE001 - report it, don't crash the probe
+        checks["qdrant"] = {"ok": False, "error": str(exc)}
+
+    try:
+        await session.execute(select(1))
+        checks["database"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = {"ok": False, "error": str(exc)}
+
+    if s.llm_provider == "fake":
+        checks["llm"] = {"ok": True, "provider": "fake"}
+    else:
+        try:
+            get_llm()
+            checks["llm"] = {"ok": True, "provider": s.llm_provider}
+        except Exception as exc:  # noqa: BLE001
+            checks["llm"] = {"ok": False, "provider": s.llm_provider, "error": str(exc)}
+
+    return {"ok": all(c["ok"] for c in checks.values()), **checks}
 
 
 @app.post("/dossiers", response_model=DossierResponse)
