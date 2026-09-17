@@ -160,5 +160,21 @@ jobs:
       - name: Image sanity check
         run: docker run --rm "ghcr.io/hemarani-mysore/praxis:${{ github.sha }}" python -c "import praxis; print(praxis.__version__)"
 
-  # Phase 5 will also add: kubeconform/kustomize validation, and a `kind`
-  # smoke test of deploy/k8s (slices 3-4).
+  k8s-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kustomize
+        run: |
+          curl -sL -o /tmp/kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+          sudo tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin
+      - name: Install kubeconform
+        run: |
+          curl -sL -o /tmp/kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz"
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+      - name: Validate dev overlay
+        run: kustomize build deploy/k8s/overlays/dev | kubeconform -strict -summary
+      - name: Validate prod overlay
+        run: kustomize build deploy/k8s/overlays/prod | kubeconform -strict -summary
+
+  # Phase 5 will also add: a `kind` smoke test of deploy/k8s (slice 4).

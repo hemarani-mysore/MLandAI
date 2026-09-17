@@ -1,0 +1,62 @@
+# Third-party image — hardened where that's safe to do blind (no Docker on
+# this machine to verify against), but readOnlyRootFilesystem is left off:
+# Qdrant's image writes to more than just its data volume internally, and
+# forcing it without being able to test would risk a StatefulSet that never
+# comes up.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: praxis
+  labels:
+    app: praxis
+    component: qdrant
+spec:
+  serviceName: qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+      component: qdrant
+  template:
+    metadata:
+      labels:
+        app: praxis
+        component: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.12.4
+          ports:
+            - containerPort: 6333
+              name: http
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # Qdrant's own documented k8s convention: /healthz for liveness,
+          # /readyz for readiness (https://api.qdrant.tech/api-reference/service/readyz).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

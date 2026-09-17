@@ -1,0 +1,71 @@
+# Real ingress host, managed Qdrant/Redis (self-hosted StatefulSet/Deployment
+# from base deleted below), real provider. `praxis-secrets` is NOT generated
+# here — copy base/secret.example.yaml to secret.yaml, fill in real values
+# (OPENAI_API_KEY, PRAXIS_DATABASE_URL pointed at Neon, ...), and
+# `kubectl apply -f secret.yaml` once per cluster, out of band from
+# `kustomize build` / `kubectl apply -k`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: StatefulSet
+      name: qdrant
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: qdrant
+  - target:
+      kind: Service
+      name: qdrant
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: qdrant
+  - target:
+      kind: Deployment
+      name: redis
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: redis
+  - target:
+      kind: Service
+      name: redis
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: redis
+  - target:
+      kind: Ingress
+      name: praxis
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: praxis-api.example.com
+      - op: replace
+        path: /spec/rules/1/host
+        value: praxis-mcp.example.com
+
+configMapGenerator:
+  - name: praxis-config
+    behavior: merge
+    literals:
+      - PRAXIS_LLM_PROVIDER=openai
+      - PRAXIS_EMBEDDING_PROVIDER=openai
+      # Real values — Qdrant Cloud / Upstash endpoints — set here (not
+      # secret; these are non-sensitive hostnames, unlike PRAXIS_DATABASE_URL
+      # which embeds a password and lives in the Secret instead).
+      - PRAXIS_QDRANT_URL=https://REPLACE-ME.qdrant.io:6333
+      - PRAXIS_REDIS_URL=rediss://REPLACE-ME.upstash.io:6379

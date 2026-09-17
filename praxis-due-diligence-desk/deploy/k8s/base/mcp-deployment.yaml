@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp
+  namespace: praxis
+  labels:
+    app: praxis
+    component: mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+      component: mcp
+  template:
+    metadata:
+      labels:
+        app: praxis
+        component: mcp
+    spec:
+      serviceAccountName: praxis
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp
+          image: ghcr.io/hemarani-mysore/praxis:latest
+          command: ["praxis", "mcp"]
+          ports:
+            - containerPort: 8001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: praxis-config
+            - secretRef:
+                name: praxis-secrets
+          env:
+            - name: PRAXIS_MCP_TRANSPORT
+              value: streamable-http
+            - name: PRAXIS_MCP_HOST
+              value: "0.0.0.0"
+            - name: PRAXIS_MCP_PORT
+              value: "8001"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

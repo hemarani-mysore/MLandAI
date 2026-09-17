@@ -1,0 +1,61 @@
+# kind-friendly: NodePort (no ingress controller needed in an ephemeral
+# cluster), in-cluster Qdrant + Redis (from base, unchanged), SQLite instead
+# of Postgres, fake LLM/embedding provider (from base's configmap defaults,
+# unchanged) — zero secrets needed for this overlay to actually come up.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Re-declared here too, not just inherited from base — a generator this
+# overlay itself owns (secretGenerator/configMapGenerator below) doesn't pick
+# up base's namespace stamp otherwise (confirmed: the generated Secret came
+# out un-namespaced without this).
+namespace: praxis
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: Service
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: replace
+        path: /spec/ports/0
+        value: {name: http, port: 8000, targetPort: http, nodePort: 30080}
+  - target:
+      kind: Ingress
+      name: praxis
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: praxis
+
+configMapGenerator:
+  - name: praxis-config
+    behavior: merge
+    literals:
+      # No real Postgres in dev — the checkpointer already gets /data (base
+      # configmap); the main app DB lives right next to it in the same
+      # emptyDir.
+      - PRAXIS_DATABASE_URL=sqlite+aiosqlite:////data/praxis.db
+
+# The Deployments' envFrom references a Secret named `praxis-secrets` — it
+# must exist for pods to start at all, even with every value blank (the fake
+# provider needs no real keys). secretGenerator + kustomize's built-in name-
+# reference transformer keeps every envFrom.secretRef.name pointed at
+# whatever hashed name this generates, so kind-smoke needs zero manual setup.
+# Deliberately NOT setting PRAXIS_DATABASE_URL here: envFrom lists the
+# configmap before the secret, and Kubernetes lets a later envFrom source
+# silently override an earlier one for the same key — an empty value here
+# would clobber the sqlite path set above.
+secretGenerator:
+  - name: praxis-secrets
+    literals:
+      - OPENAI_API_KEY=
+      - ANTHROPIC_API_KEY=
+      - NEBIUS_API_KEY=

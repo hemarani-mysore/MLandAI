@@ -1,0 +1,44 @@
+# Only the components that actually talk to each datastore may reach it.
+# Verified in CI's kind-smoke job: a debug pod outside these labels is
+# refused; a pod matching them succeeds — not just present in the YAML.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-qdrant-ingress
+  namespace: praxis
+spec:
+  podSelector:
+    matchLabels:
+      app: praxis
+      component: qdrant
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: component
+                operator: In
+                values: ["api", "worker", "mcp"]
+      ports:
+        - port: 6333
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-ingress
+  namespace: praxis
+spec:
+  podSelector:
+    matchLabels:
+      app: praxis
+      component: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: component
+                operator: In
+                values: ["api", "worker"]
+      ports:
+        - port: 6379

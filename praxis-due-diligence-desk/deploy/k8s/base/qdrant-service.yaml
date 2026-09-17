@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: praxis
+  labels:
+    app: praxis
+    component: qdrant
+spec:
+  # Headless — required for the StatefulSet's `serviceName: qdrant` to give
+  # its pod stable DNS identity; `qdrant:6333` still resolves fine for
+  # ordinary client lookups at replicas: 1.
+  clusterIP: None
+  selector:
+    app: praxis
+    component: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http

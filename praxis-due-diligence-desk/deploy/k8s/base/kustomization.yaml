@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: praxis
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-hpa.yaml
+  - api-pdb.yaml
+  - worker-deployment.yaml
+  - mcp-deployment.yaml
+  - mcp-service.yaml
+  - qdrant-statefulset.yaml
+  - qdrant-service.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - networkpolicy.yaml
+  - ingress.yaml
+
+# secret.example.yaml is NOT listed here — it's a template to copy, fill in,
+# and `kubectl apply -f` separately per cluster, never generated or committed
+# with real values by kustomize.
+
+# A generator, not a plain resource — so overlays can `behavior: merge` into
+# it (kustomize's merge-generator tracking only works against a ConfigMap
+# that was itself generated). Shared by api/worker/mcp; overlays patch this
+# per environment (dev: adds a SQLite PRAXIS_DATABASE_URL; prod: real
+# provider + managed Qdrant/Redis endpoints).
+configMapGenerator:
+  - name: praxis-config
+    literals:
+      - PRAXIS_LLM_PROVIDER=fake
+      - PRAXIS_EMBEDDING_PROVIDER=fake
+      - PRAXIS_QDRANT_URL=http://qdrant:6333
+      - PRAXIS_REDIS_URL=redis://redis:6379
+      # The LangGraph checkpointer always uses its own SQLite file regardless
+      # of PRAXIS_DATABASE_URL — needs a writable path even under
+      # readOnlyRootFilesystem, hence the emptyDir mounted at /data (see
+      # api-deployment.yaml / worker-deployment.yaml / mcp-deployment.yaml).
+      - PRAXIS_CHECKPOINT_DB_PATH=/data/praxis_checkpoints.db

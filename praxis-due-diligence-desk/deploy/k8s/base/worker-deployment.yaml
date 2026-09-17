@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: praxis
+  labels:
+    app: praxis
+    component: worker
+spec:
+  replicas: 1 # the ingestion queue isn't sharded yet — one replica only
+  selector:
+    matchLabels:
+      app: praxis
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: praxis
+        component: worker
+    spec:
+      serviceAccountName: praxis
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/hemarani-mysore/praxis:latest
+          command: ["arq", "praxis.worker.WorkerSettings"]
+          envFrom:
+            - configMapRef:
+                name: praxis-config
+            - secretRef:
+                name: praxis-secrets
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

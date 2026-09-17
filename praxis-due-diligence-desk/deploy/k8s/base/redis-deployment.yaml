@@ -1,0 +1,41 @@
+# Self-hosted Redis — used by the dev overlay (in-cluster, no external
+# account needed). The prod overlay points PRAXIS_REDIS_URL at a managed
+# instance (Upstash) instead and excludes this + redis-service.yaml via its
+# kustomization's `resources` list.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: praxis
+  labels:
+    app: praxis
+    component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: praxis
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 2

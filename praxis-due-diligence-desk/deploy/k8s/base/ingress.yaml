@@ -1,0 +1,33 @@
+# Host is a placeholder — overlays/prod patches it to the real domain.
+# overlays/dev doesn't apply this at all (NodePort is simpler for a
+# short-lived kind cluster with no real DNS); see that overlay's
+# kustomization.yaml resources list.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: praxis
+  namespace: praxis
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: praxis.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+    - host: praxis-mcp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mcp
+                port:
+                  number: 8001
